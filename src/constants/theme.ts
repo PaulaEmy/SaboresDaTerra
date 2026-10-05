@@ -8,6 +8,10 @@ import '@/global.css';
 import { Platform } from 'react-native';
 
 export const Colors = {
+  brandGreen: '#28551D',
+  cream: '#FCFAF5',
+  clay: '#C9704D',
+  muted: '#8A8A8A',
   light: {
     text: '#000000',
     background: '#ffffff',
