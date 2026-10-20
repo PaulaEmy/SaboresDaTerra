@@ -24,6 +24,7 @@ export type UserRecipe = {
   servings: number;
   difficulty: 'Fácil' | 'Médio' | 'Difícil';
   ingredients: { name: string; quantity: string }[];
+  tags: string[];
   steps: string[];
   media: RecipeMedia[];
   createdAt: string;
@@ -55,6 +56,7 @@ export type Recipe = UserRecipe & {
 export type RecipeSummary = Pick<UserRecipe, 'id' | 'title' | 'description' | 'prepTimeMinutes' | 'servings' | 'difficulty'> & {
   author: string;
   imageUrl: string | null;
+  tags: string[];
   averageRating: number | null;
   ratingCount: number;
 };
@@ -65,6 +67,7 @@ export type PersonalRecipeState = {
   savedRecipeIds: string[];
   savedLists: SavedRecipeList[];
   shoppingItems: ShoppingListItem[];
+  hiddenIngredients: string[];
 };
 
 export type RecipeMediaUpload = {
@@ -198,6 +201,7 @@ export type RecipeInput = {
   servings: number;
   difficulty: UserRecipe['difficulty'];
   ingredients: { name: string; quantity: string }[];
+  tags: string[];
   steps: string[];
 };
 
@@ -279,15 +283,26 @@ export async function listRecipes() {
   return searchRecipes({});
 }
 
-export async function searchRecipes(filters: { query?: string; maxTime?: number; difficulty?: string }) {
+export async function searchRecipes(filters: {
+  query?: string;
+  maxTime?: number;
+  difficulty?: string;
+  tags?: string[];
+  tagQuery?: string;
+}) {
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set('q', filters.query.trim());
   if (filters.maxTime) params.set('maxTime', String(filters.maxTime));
   if (filters.difficulty && filters.difficulty !== 'Qualquer') params.set('difficulty', filters.difficulty);
+  filters.tags?.forEach((tag) => params.append('tag', tag));
+  if (filters.tagQuery?.trim()) params.set('tagQuery', filters.tagQuery.trim());
   const query = params.toString();
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/api/recipes${query ? `?${query}` : ''}`);
+    const token = await getToken();
+    response = await fetch(`${API_URL}/api/recipes${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
   } catch {
     throw new Error('Não foi possível conectar ao servidor para carregar receitas.');
   }
@@ -381,6 +396,28 @@ export async function addShoppingItem(name: string) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error ?? 'Não foi possível adicionar o item.');
   return result.item as ShoppingListItem;
+}
+
+export async function addShoppingItems(names: string[]) {
+  const response = await authenticatedFetch('/api/me/shopping-items/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ names }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível adicionar os ingredientes.');
+  return result.items as ShoppingListItem[];
+}
+
+export async function setHiddenIngredients(ingredients: string[]) {
+  const response = await authenticatedFetch('/api/me/hidden-ingredients', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ingredients }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível salvar suas restrições.');
+  return result.ingredients as string[];
 }
 
 export async function updateShoppingItem(id: string, completed: boolean) {

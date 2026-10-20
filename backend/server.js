@@ -95,6 +95,7 @@ function validateRecipePayload(body) {
   const servings = Number(body?.servings);
   const difficulty = body?.difficulty;
   const ingredients = body?.ingredients;
+  const tags = body?.tags ?? [];
   const steps = body?.steps;
   if (
     !title || title.length > 140 || !description || description.length > 5000 ||
@@ -103,6 +104,8 @@ function validateRecipePayload(body) {
     !['Fácil', 'Médio', 'Difícil'].includes(difficulty) ||
     !Array.isArray(ingredients) || ingredients.length < 1 || ingredients.length > 50 ||
     ingredients.some((item) => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 160 || typeof item.quantity !== 'string' || !item.quantity.trim() || item.quantity.length > 80) ||
+    !Array.isArray(tags) || tags.length > 20 ||
+    tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 40) ||
     !Array.isArray(steps) || steps.length < 1 || steps.length > 50 ||
     steps.some((step) => typeof step !== 'string' || !step.trim() || step.length > 3000)
   ) return null;
@@ -114,6 +117,7 @@ function validateRecipePayload(body) {
     servings,
     difficulty,
     ingredients: ingredients.map((item) => ({ name: item.name.trim(), quantity: item.quantity.trim() })),
+    tags: [...new Map(tags.map((tag) => [tag.trim().toLocaleLowerCase(), tag.trim()])).values()],
     steps: steps.map((step) => step.trim()),
   };
 }
@@ -316,6 +320,24 @@ function requireAuth(request, response, next) {
   }
 }
 
+function optionalAuth(request, response, next) {
+  const authorization = request.headers.authorization;
+  if (!authorization) return next();
+  if (!authorization.startsWith('Bearer ')) {
+    return response.status(401).json({ error: 'Sessão inválida ou expirada.' });
+  }
+  try {
+    const payload = jwt.verify(authorization.slice(7), process.env.JWT_SECRET, { issuer: 'sabores-da-terra-api' });
+    if (typeof payload !== 'object' || typeof payload.id !== 'string') {
+      return response.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    }
+    request.authUserId = payload.id;
+    return next();
+  } catch {
+    return response.status(401).json({ error: 'Sessão inválida ou expirada.' });
+  }
+}
+
 async function getRecipeDetails(recipeId) {
   const [recipes] = await pool.execute(
     `SELECT r.id, r.user_id, r.title, r.description, r.prep_time_minutes, r.servings, r.difficulty,
@@ -328,8 +350,9 @@ async function getRecipeDetails(recipeId) {
   if (!recipes.length) return null;
 
   const recipe = recipes[0];
-  const [[ingredients], [steps], [media], [comments]] = await Promise.all([
+  const [[ingredients], [tags], [steps], [media], [comments]] = await Promise.all([
     pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipeId]),
+    pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipeId]),
     pool.execute('SELECT instruction FROM recipe_steps WHERE recipe_id = ? ORDER BY position', [recipeId]),
     pool.execute('SELECT id, media_type, mime_type, file_size FROM recipe_media WHERE recipe_id = ? ORDER BY created_at', [recipeId]),
     pool.execute(
@@ -350,6 +373,7 @@ async function getRecipeDetails(recipeId) {
     difficulty: recipe.difficulty,
     author: recipe.author_name,
     ingredients,
+    tags: tags.map((item) => item.tag),
     steps: steps.map((step) => step.instruction),
     media: media.map((item) => ({
       id: item.id,
@@ -364,19 +388,29 @@ async function getRecipeDetails(recipeId) {
   };
 }
 
-app.get('/api/recipes', async (request, response, next) => {
+app.get('/api/recipes', optionalAuth, async (request, response, next) => {
   try {
     const conditions = [];
     const values = [];
     const search = typeof request.query.q === 'string' ? request.query.q.trim() : '';
+    const tagQuery = typeof request.query.tagQuery === 'string' ? request.query.tagQuery.trim() : '';
     const difficulty = typeof request.query.difficulty === 'string' ? request.query.difficulty : '';
     const maxTime = Number(request.query.maxTime);
+    const tags = (Array.isArray(request.query.tag) ? request.query.tag : [request.query.tag])
+      .filter((tag) => typeof tag === 'string' && tag.trim()).map((tag) => tag.trim());
+    const hiddenIngredients = request.authUserId
+      ? (await pool.execute(
+        'SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ?',
+        [request.authUserId],
+      ))[0].map((item) => item.ingredient)
+        .filter((ingredient) => !search.toLocaleLowerCase().includes(ingredient.toLocaleLowerCase()))
+      : [];
     if (search) {
       conditions.push(`(r.title LIKE ? OR r.description LIKE ? OR EXISTS (
         SELECT 1 FROM recipe_ingredients ri WHERE ri.recipe_id = r.id AND ri.name LIKE ?
-      ))`);
+      ) OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag LIKE ?))`);
       const pattern = `%${search}%`;
-      values.push(pattern, pattern, pattern);
+      values.push(pattern, pattern, pattern, pattern);
     }
     if (['Fácil', 'Médio', 'Difícil'].includes(difficulty)) {
       conditions.push('r.difficulty = ?');
@@ -385,6 +419,21 @@ app.get('/api/recipes', async (request, response, next) => {
     if (Number.isInteger(maxTime) && maxTime > 0) {
       conditions.push('r.prep_time_minutes <= ?');
       values.push(maxTime);
+    }
+    if (tags.length) {
+      conditions.push(`EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag IN (${tags.map(() => '?').join(', ')}))`);
+      values.push(...tags);
+    }
+    if (tagQuery) {
+      conditions.push('EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag LIKE ?)');
+      values.push(`%${tagQuery}%`);
+    }
+    for (const ingredient of hiddenIngredients) {
+      conditions.push(`NOT EXISTS (
+        SELECT 1 FROM recipe_ingredients ri
+        WHERE ri.recipe_id = r.id AND ri.name LIKE ?
+      )`);
+      values.push(`%${ingredient}%`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const [recipes] = await pool.execute(
@@ -397,10 +446,10 @@ app.get('/api/recipes', async (request, response, next) => {
       values,
     );
     const results = await Promise.all(recipes.map(async (recipe) => {
-      const [ingredients] = await pool.execute(
-        'SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position',
-        [recipe.id],
-      );
+      const [[ingredients], [tags]] = await Promise.all([
+        pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipe.id]),
+        pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipe.id]),
+      ]);
       return {
         id: recipe.id,
         title: recipe.title,
@@ -411,6 +460,7 @@ app.get('/api/recipes', async (request, response, next) => {
         author: recipe.author,
         imageUrl: recipe.image_media_id ? `/api/recipes/${recipe.id}/media/${recipe.image_media_id}` : null,
         ingredients,
+        tags: tags.map((item) => item.tag),
         averageRating: recipe.average_rating === null ? null : Number(recipe.average_rating),
         ratingCount: Number(recipe.rating_count),
       };
@@ -498,7 +548,7 @@ app.post('/api/recipes/:id/reports', requireAuth, async (request, response, next
 
 app.get('/api/me/state', requireAuth, async (request, response, next) => {
   try {
-    const [[saved], [lists], [listItems], [shoppingItems]] = await Promise.all([
+    const [[saved], [lists], [listItems], [shoppingItems], [hiddenIngredients]] = await Promise.all([
       pool.execute('SELECT recipe_id FROM saved_recipes WHERE user_id = ?', [request.authUserId]),
       pool.execute('SELECT id, name FROM recipe_lists WHERE user_id = ? ORDER BY created_at', [request.authUserId]),
       pool.execute(
@@ -507,6 +557,7 @@ app.get('/api/me/state', requireAuth, async (request, response, next) => {
         [request.authUserId],
       ),
       pool.execute('SELECT id, name, completed FROM shopping_list_items WHERE user_id = ? ORDER BY created_at', [request.authUserId]),
+      pool.execute('SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ? ORDER BY ingredient', [request.authUserId]),
     ]);
     return response.json({
       savedRecipeIds: saved.map((item) => item.recipe_id),
@@ -516,6 +567,7 @@ app.get('/api/me/state', requireAuth, async (request, response, next) => {
         recipeIds: listItems.filter((item) => item.list_id === list.id).map((item) => item.recipe_id),
       })),
       shoppingItems: shoppingItems.map((item) => ({ ...item, completed: Boolean(item.completed) })),
+      hiddenIngredients: hiddenIngredients.map((item) => item.ingredient),
     });
   } catch (error) {
     return next(error);
@@ -591,6 +643,65 @@ app.post('/api/me/shopping-items', requireAuth, async (request, response, next) 
   }
 });
 
+app.post('/api/me/shopping-items/bulk', requireAuth, async (request, response, next) => {
+  const names = request.body?.names;
+  const ingredients = Array.isArray(names)
+    ? names.map((name) => typeof name === 'string' ? name.trim() : '').filter(Boolean)
+    : [];
+  if (!Array.isArray(names) || !ingredients.length || ingredients.length > 50 ||
+    ingredients.some((name) => name.length > 160) || ingredients.length !== names.length) {
+    return response.status(400).json({ error: 'Informe até 50 ingredientes, com no máximo 160 caracteres cada.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const items = ingredients.map((name) => ({ id: randomUUID(), name, completed: false }));
+    for (const item of items) {
+      await connection.execute(
+        'INSERT INTO shopping_list_items (id, user_id, name) VALUES (?, ?, ?)',
+        [item.id, request.authUserId, item.name],
+      );
+    }
+    await connection.commit();
+    return response.status(201).json({ items });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+app.put('/api/me/hidden-ingredients', requireAuth, async (request, response, next) => {
+  const ingredients = request.body?.ingredients;
+  if (!Array.isArray(ingredients) || ingredients.length > 50 ||
+    ingredients.some((ingredient) => typeof ingredient !== 'string' || !ingredient.trim() || ingredient.trim().length > 160)) {
+    return response.status(400).json({ error: 'Informe até 50 ingredientes válidos, com no máximo 160 caracteres cada.' });
+  }
+  const normalizedIngredients = [...new Map(
+    ingredients.map((ingredient) => [ingredient.trim().toLocaleLowerCase(), ingredient.trim()]),
+  ).values()];
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute('DELETE FROM user_hidden_ingredients WHERE user_id = ?', [request.authUserId]);
+    for (const ingredient of normalizedIngredients) {
+      await connection.execute(
+        'INSERT INTO user_hidden_ingredients (user_id, ingredient) VALUES (?, ?)',
+        [request.authUserId, ingredient],
+      );
+    }
+    await connection.commit();
+    return response.json({ ingredients: normalizedIngredients });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
 app.patch('/api/me/shopping-items/:id', requireAuth, async (request, response, next) => {
   if (typeof request.body?.completed !== 'boolean') return response.status(400).json({ error: 'Informe o estado concluído do item.' });
   try {
@@ -621,8 +732,9 @@ app.get('/api/recipes/mine', requireAuth, async (request, response, next) => {
       [request.authUserId],
     );
     const results = await Promise.all(recipes.map(async (recipe) => {
-      const [[ingredients], [steps], [media]] = await Promise.all([
+      const [[ingredients], [tags], [steps], [media]] = await Promise.all([
         pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipe.id]),
+        pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipe.id]),
         pool.execute('SELECT instruction FROM recipe_steps WHERE recipe_id = ? ORDER BY position', [recipe.id]),
         pool.execute('SELECT id, media_type, mime_type, file_size FROM recipe_media WHERE recipe_id = ? ORDER BY created_at', [recipe.id]),
       ]);
@@ -634,6 +746,7 @@ app.get('/api/recipes/mine', requireAuth, async (request, response, next) => {
         servings: recipe.servings,
         difficulty: recipe.difficulty,
         ingredients,
+        tags: tags.map((item) => item.tag),
         steps: steps.map((step) => step.instruction),
         media: media.map((item) => ({
           id: item.id,
@@ -681,6 +794,9 @@ app.post('/api/recipes', requireAuth, async (request, response, next) => {
         [randomUUID(), recipeId, ingredient.name, ingredient.quantity, position],
       );
     }
+    for (const tag of recipe.tags) {
+      await connection.execute('INSERT INTO recipe_tags (recipe_id, tag) VALUES (?, ?)', [recipeId, tag]);
+    }
     for (const [position, instruction] of recipe.steps.entries()) {
       await connection.execute(
         'INSERT INTO recipe_steps (id, recipe_id, instruction, position) VALUES (?, ?, ?, ?)',
@@ -715,11 +831,15 @@ app.put('/api/recipes/:id', requireAuth, async (request, response, next) => {
     );
     await connection.execute('DELETE FROM recipe_ingredients WHERE recipe_id = ?', [request.params.id]);
     await connection.execute('DELETE FROM recipe_steps WHERE recipe_id = ?', [request.params.id]);
+    await connection.execute('DELETE FROM recipe_tags WHERE recipe_id = ?', [request.params.id]);
     for (const [position, ingredient] of recipe.ingredients.entries()) {
       await connection.execute(
         'INSERT INTO recipe_ingredients (id, recipe_id, name, quantity, position) VALUES (?, ?, ?, ?, ?)',
         [randomUUID(), request.params.id, ingredient.name, ingredient.quantity, position],
       );
+    }
+    for (const tag of recipe.tags) {
+      await connection.execute('INSERT INTO recipe_tags (recipe_id, tag) VALUES (?, ?)', [request.params.id, tag]);
     }
     for (const [position, instruction] of recipe.steps.entries()) {
       await connection.execute(
@@ -853,6 +973,13 @@ await pool.query(`CREATE TABLE IF NOT EXISTS recipe_ingredients (
   CONSTRAINT fk_recipe_ingredients_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
   INDEX idx_recipe_ingredients_position (recipe_id, position)
 )`);
+await pool.query(`CREATE TABLE IF NOT EXISTS recipe_tags (
+  recipe_id CHAR(36) NOT NULL,
+  tag VARCHAR(40) NOT NULL,
+  PRIMARY KEY (recipe_id, tag),
+  CONSTRAINT fk_recipe_tags_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+  INDEX idx_recipe_tags_tag (tag)
+)`);
 await pool.query(`CREATE TABLE IF NOT EXISTS recipe_steps (
   id CHAR(36) NOT NULL PRIMARY KEY,
   recipe_id CHAR(36) NOT NULL,
@@ -945,6 +1072,12 @@ await pool.query(`CREATE TABLE IF NOT EXISTS shopping_list_items (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_shopping_list_items_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_shopping_list_user_created (user_id, created_at)
+)`);
+await pool.query(`CREATE TABLE IF NOT EXISTS user_hidden_ingredients (
+  user_id CHAR(36) NOT NULL,
+  ingredient VARCHAR(160) NOT NULL,
+  PRIMARY KEY (user_id, ingredient),
+  CONSTRAINT fk_user_hidden_ingredients_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )`);
 
 app.listen(port, () => console.log(`Sabores da Terra API listening on port ${port}`));

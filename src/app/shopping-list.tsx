@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppState } from '@/components/app-state';
@@ -38,7 +38,10 @@ export default function ShoppingListScreen() {
           <Text style={styles.title}>Lista de compras</Text>
         </View>
 
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.listScroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}>
           {shoppingItems.map((item) => (
             <View key={item.id} style={styles.item}>
               <Pressable
@@ -78,7 +81,7 @@ export default function ShoppingListScreen() {
               <Text style={styles.addIcon}>+</Text>
             </Pressable>
           </View>
-        </View>
+        </ScrollView>
 
         <Pressable style={styles.exportButton}>
           <Text style={styles.exportIcon}>⇩</Text>

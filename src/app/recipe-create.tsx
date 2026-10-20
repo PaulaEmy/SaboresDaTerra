@@ -1,7 +1,7 @@
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Image, Platform, Pressable, Text, View } from 'react-native';
+import { Image, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { AuthHeader, AuthScreen, Field, PrimaryButton } from '@/components/auth-ui';
@@ -9,6 +9,7 @@ import { createRecipe, getRecipe, updateRecipe, uploadRecipeMedia, type RecipeMe
 import { userRecipesStyles as styles } from '@/styles/user-recipes.styles';
 
 const difficultyOptions: UserRecipe['difficulty'][] = ['Fácil', 'Médio', 'Difícil'];
+const suggestedTags = ['Dieta', 'Vegetariano', 'Vegano', 'Low Carb'];
 
 export default function CreateRecipeScreen() {
   const { editId } = useLocalSearchParams<{ editId?: string }>();
@@ -20,6 +21,8 @@ export default function CreateRecipeScreen() {
   const [servings, setServings] = useState('');
   const [difficulty, setDifficulty] = useState<UserRecipe['difficulty'] | ''>('');
   const [ingredients, setIngredients] = useState([{ name: '', quantity: '' }]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [customTag, setCustomTag] = useState('');
   const [steps, setSteps] = useState(['']);
   const [audio, setAudio] = useState<RecipeMediaUpload | null>(null);
   const [video, setVideo] = useState<RecipeMediaUpload | null>(null);
@@ -41,6 +44,7 @@ export default function CreateRecipeScreen() {
         setServings(String(recipe.servings));
         setDifficulty(recipe.difficulty);
         setIngredients(recipe.ingredients.length ? recipe.ingredients : [{ name: '', quantity: '' }]);
+        setTags(recipe.tags ?? []);
         setSteps(recipe.steps.length ? recipe.steps : ['']);
         setCreatedRecipeId(recipe.id);
       })
@@ -127,6 +131,18 @@ export default function CreateRecipeScreen() {
     }
   }
 
+  function addCustomTag() {
+    const tag = customTag.trim();
+    if (!tag || tags.some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase())) return;
+    if (tags.length >= 20) {
+      setError('Uma receita pode ter no máximo 20 tags.');
+      return;
+    }
+    setTags((current) => [...current, tag]);
+    setCustomTag('');
+    setError('');
+  }
+
   async function handleCreateRecipe() {
     if (submitting) return;
     setError('');
@@ -142,6 +158,7 @@ export default function CreateRecipeScreen() {
       setError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
       return;
     }
+
     if (!difficulty) return;
     setSubmitting(true);
     try {
@@ -156,6 +173,7 @@ export default function CreateRecipeScreen() {
         servings: Number(servings),
         difficulty,
         ingredients: cleanIngredients,
+        tags,
         steps: cleanSteps,
       };
       let recipeId = editId ?? createdRecipeId;
@@ -207,6 +225,50 @@ export default function CreateRecipeScreen() {
             </Pressable>
           ))}
         </View>
+
+        <Text style={styles.sectionTitle}>Tags da receita</Text>
+        <Text style={styles.tagDescription}>Escolha as categorias e adicione tags personalizadas.</Text>
+        <View style={styles.tagChoices}>
+          {suggestedTags.map((tag) => {
+            const selected = tags.some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase());
+            return (
+              <Pressable
+                key={tag}
+                onPress={() => {
+                  if (selected) {
+                    setTags((current) => current.filter((item) => item.toLocaleLowerCase() !== tag.toLocaleLowerCase()));
+                  } else if (tags.length < 20) {
+                    setTags((current) => [...current, tag]);
+                  } else {
+                    setError('Uma receita pode ter no máximo 20 tags.');
+                  }
+                }}
+                style={[styles.tagChoice, selected && styles.choiceSelected]}>
+                <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{tag}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={styles.tagInputRow}>
+          <TextInput
+            value={customTag}
+            onChangeText={setCustomTag}
+            onSubmitEditing={addCustomTag}
+            placeholder="Ex.: Sem glúten"
+            placeholderTextColor="#99928A"
+            style={styles.tagInput}
+            maxLength={40}
+            returnKeyType="done"
+          />
+          <Pressable onPress={addCustomTag} style={styles.tagAddButton}>
+            <Text style={styles.tagAddText}>Adicionar</Text>
+          </Pressable>
+        </View>
+        {tags.filter((tag) => !suggestedTags.some((suggested) => suggested.toLocaleLowerCase() === tag.toLocaleLowerCase())).map((tag) => (
+          <Pressable key={tag} onPress={() => setTags((current) => current.filter((item) => item !== tag))} style={styles.customTag}>
+            <Text style={styles.customTagText}>{tag}  ×</Text>
+          </Pressable>
+        ))}
 
         <Text style={styles.sectionTitle}>Ingredientes</Text>
         {ingredients.map((ingredient, index) => (

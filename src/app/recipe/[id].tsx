@@ -14,7 +14,7 @@ const reportReasons = ['Conteúdo ofensivo', 'Informação incorreta', 'Imagem i
 
 export default function RecipeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user, addIngredient, toggleSavedRecipe, savedRecipeIds, savedLists, saveRecipeToList } = useAppState();
+  const { user, addIngredient, addIngredients, toggleSavedRecipe, savedRecipeIds, savedLists, saveRecipeToList } = useAppState();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,6 +29,8 @@ export default function RecipeDetailScreen() {
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [addingAllIngredients, setAddingAllIngredients] = useState(false);
   const isSaved = recipe ? savedRecipeIds.includes(recipe.id) : false;
   const isRecipeAuthor = recipe?.authorId === user?.id;
   const coverImage = recipe?.media.find((item) => item.type === 'image');
@@ -80,10 +82,26 @@ export default function RecipeDetailScreen() {
       await reportRecipe({ recipeId: recipe.id, targetType: reportTarget, commentId: reportCommentId, reason: selectedReason, details: reportComment });
       setReportVisible(false);
       setReportComment('');
+      setFeedbackMessage('Denúncia enviada.');
       setFeedbackVisible(true);
       setError('');
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Não foi possível enviar a denúncia.');
+    }
+  }
+
+  async function addAllIngredients() {
+    if (!recipe || addingAllIngredients) return;
+    setAddingAllIngredients(true);
+    setError('');
+    try {
+      await addIngredients(recipe.ingredients.map((ingredient) => `${ingredient.quantity} ${ingredient.name}`.trim()));
+      setFeedbackMessage('Ingredientes adicionados à lista!');
+      setFeedbackVisible(true);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Não foi possível adicionar os ingredientes.');
+    } finally {
+      setAddingAllIngredients(false);
     }
   }
 
@@ -125,6 +143,7 @@ export default function RecipeDetailScreen() {
           <View style={styles.content}>
             <Text style={styles.title}>{recipe.title}</Text>
             <Text style={styles.meta}>Por {recipe.author} • Dificuldade {recipe.difficulty}</Text>
+            {recipe.tags.length ? <Text style={styles.recipeTags}>{recipe.tags.join(' · ')}</Text> : null}
             <Text style={styles.description}>{recipe.description}</Text>
             <View style={styles.stats}>
               <Text style={styles.stat}>◷  {recipe.prepTimeMinutes} min</Text><Text style={styles.stat}>♧  {recipe.servings} porções</Text><Text style={styles.stat}>★  {averageRating} ({recipe.ratingCount})</Text>
@@ -136,9 +155,16 @@ export default function RecipeDetailScreen() {
                 </Pressable>
               ))}
             </View>
-            {tab === 'ingredients' && <Ingredients ingredients={recipe.ingredients} onAdd={(ingredient, quantity) => {
-              void addIngredient(`${quantity} ${ingredient}`.trim()).then(() => setFeedbackVisible(true)).catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Não foi possível adicionar o ingrediente.'));
-            }} />}
+            {tab === 'ingredients' && <Ingredients
+              ingredients={recipe.ingredients}
+              addingAll={addingAllIngredients}
+              onAddAll={() => void addAllIngredients()}
+              onAdd={(ingredient, quantity) => {
+                void addIngredient(`${quantity} ${ingredient}`.trim())
+                  .then(() => { setFeedbackMessage('Ingrediente adicionado com sucesso!'); setFeedbackVisible(true); })
+                  .catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Não foi possível adicionar o ingrediente.'));
+              }}
+            />}
             {tab === 'steps' && <Steps steps={recipe.steps} media={recipe.media} />}
             {tab === 'comments' && <Comments comments={recipe.comments} text={commentText} setText={setCommentText} onAdd={() => void submitComment()} onReport={(commentId) => openReport('comment', commentId)} />}
             {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
@@ -174,13 +200,25 @@ export default function RecipeDetailScreen() {
           <View style={styles.modalActions}><Pressable style={styles.cancelButton} onPress={() => setRatingModalVisible(false)}><Text style={styles.actionText}>Cancelar</Text></Pressable><Pressable disabled={!selectedRating} style={[styles.saveButton, !selectedRating && styles.disabledButton]} onPress={() => void submitRating()}><Text style={styles.saveText}>Enviar</Text></Pressable></View>
         </View></View>
       </Modal>
-      {feedbackVisible && <Pressable style={styles.feedbackToast} onPress={() => setFeedbackVisible(false)}><Text style={styles.feedbackIcon}>✓</Text><Text style={styles.feedbackText}>Ingrediente adicionado com sucesso!</Text></Pressable>}
+      {feedbackVisible && <Pressable style={styles.feedbackToast} onPress={() => setFeedbackVisible(false)}><Text style={styles.feedbackIcon}>✓</Text><Text style={styles.feedbackText}>{feedbackMessage}</Text></Pressable>}
     </View>
   );
 }
 
-function Ingredients({ ingredients, onAdd }: { ingredients: Recipe['ingredients']; onAdd: (name: string, quantity: string) => void }) {
-  return <View style={styles.tabContent}>{ingredients.map((ingredient, index) => <View key={`${ingredient.name}-${index}`} style={styles.ingredientRow}><Text style={styles.ingredient}>{ingredient.quantity ? `${ingredient.quantity} ` : ''}{ingredient.name}</Text><Pressable onPress={() => onAdd(ingredient.name, ingredient.quantity)}><Text style={styles.addToList}>+ LISTA</Text></Pressable></View>)}</View>;
+function Ingredients({ ingredients, addingAll, onAdd, onAddAll }: {
+  ingredients: Recipe['ingredients'];
+  addingAll: boolean;
+  onAdd: (name: string, quantity: string) => void;
+  onAddAll: () => void;
+}) {
+  return (
+    <View style={styles.tabContent}>
+      <Pressable accessibilityRole="button" disabled={addingAll} onPress={onAddAll} style={[styles.addAllButton, addingAll && styles.disabledButton]}>
+        <Text style={styles.addAllText}>{addingAll ? 'Adicionando ingredientes...' : 'Adicionar todos à lista de compras'}</Text>
+      </Pressable>
+      {ingredients.map((ingredient, index) => <View key={`${ingredient.name}-${index}`} style={styles.ingredientRow}><Text style={styles.ingredient}>{ingredient.quantity ? `${ingredient.quantity} ` : ''}{ingredient.name}</Text><Pressable onPress={() => onAdd(ingredient.name, ingredient.quantity)}><Text style={styles.addToList}>+ LISTA</Text></Pressable></View>)}
+    </View>
+  );
 }
 
 function Steps({ steps, media }: { steps: Recipe['steps']; media: Recipe['media'] }) {

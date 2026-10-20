@@ -1,28 +1,47 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Image, Pressable, ScrollView, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { useAppState } from '@/components/app-state';
-import { getRecipeMediaUrl, listRecipes, type RecipeSummary } from '@/services/auth-api';
+import { getRecipeMediaUrl, searchRecipes, type RecipeSummary } from '@/services/auth-api';
 import { appStyles } from '@/styles/app.styles';
 
 export default function AppHomeScreen() {
-  const { user } = useAppState();
+  const { user, hiddenIngredients, personalDataError, personalDataLoading } = useAppState();
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [loadError, setLoadError] = useState('');
+  const allRecipesList = useRef<ScrollView>(null);
+  const [allRecipesListWidth, setAllRecipesListWidth] = useState(0);
+  const [allRecipesContentWidth, setAllRecipesContentWidth] = useState(0);
+  const [allRecipesOffset, setAllRecipesOffset] = useState(0);
 
   useEffect(() => {
+    if (personalDataLoading || personalDataError) return;
     let active = true;
-    listRecipes()
+    searchRecipes({})
       .then((items) => { if (active) setRecipes(items); })
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Não foi possível carregar receitas.'); });
     return () => { active = false; };
-  }, []);
+  }, [hiddenIngredients, personalDataError, personalDataLoading]);
 
-  const seasonalRecipes = recipes.slice(0, 2);
-  const recommendedRecipes = recipes.slice(2);
+  const visibleRecipes = personalDataError ? [] : recipes;
+  const seasonalRecipes = visibleRecipes.slice(0, 5);
+  const canScrollAllRecipesBack = allRecipesOffset > 0;
+  const canScrollAllRecipesForward = allRecipesOffset + allRecipesListWidth < allRecipesContentWidth - 1;
+
+  function scrollAllRecipes(direction: -1 | 1) {
+    const nextOffset = Math.max(0, Math.min(
+      allRecipesOffset + direction * Math.max(allRecipesListWidth * 0.8, 240),
+      allRecipesContentWidth - allRecipesListWidth,
+    ));
+    allRecipesList.current?.scrollTo({ x: nextOffset, animated: true });
+  }
+
+  function updateAllRecipesOffset(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    setAllRecipesOffset(event.nativeEvent.contentOffset.x);
+  }
 
   return (
     <View style={appStyles.screen}>
@@ -69,15 +88,42 @@ export default function AppHomeScreen() {
               </Pressable>
             ))}
           </ScrollView>
-          {loadError ? <Text style={appStyles.emptyState}>{loadError}</Text> : null}
-          {!loadError && recipes.length === 0 ? <Text style={appStyles.emptyState}>Ainda não há receitas publicadas.</Text> : null}
+          {personalDataError || loadError ? <Text style={appStyles.emptyState}>{personalDataError || loadError}</Text> : null}
+          {!personalDataError && !loadError && visibleRecipes.length === 0 ? <Text style={appStyles.emptyState}>Ainda não há receitas publicadas.</Text> : null}
 
-          {recommendedRecipes.length > 0 ? <View style={appStyles.sectionHeader}>
-            <Text style={appStyles.sectionTitle}>Mais receitas</Text>
-          </View> : null}
+          {visibleRecipes.length > 0 ? <>
+            <View style={appStyles.sectionHeader}>
+              <Text style={appStyles.sectionTitle}>Todas as receitas</Text>
+              <View style={appStyles.carouselActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver receitas anteriores"
+                  disabled={!canScrollAllRecipesBack}
+                  onPress={() => scrollAllRecipes(-1)}
+                  style={[appStyles.carouselArrow, !canScrollAllRecipesBack && appStyles.carouselArrowDisabled]}>
+                  <Text style={appStyles.carouselArrowText}>‹</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver mais receitas"
+                  disabled={!canScrollAllRecipesForward}
+                  onPress={() => scrollAllRecipes(1)}
+                  style={[appStyles.carouselArrow, !canScrollAllRecipesForward && appStyles.carouselArrowDisabled]}>
+                  <Text style={appStyles.carouselArrowText}>›</Text>
+                </Pressable>
+              </View>
+            </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={appStyles.horizontalList}>
-            {recommendedRecipes.map((recipe) => (
+          <ScrollView
+            ref={allRecipesList}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={appStyles.horizontalList}
+            onLayout={(event) => setAllRecipesListWidth(event.nativeEvent.layout.width)}
+            onContentSizeChange={(width) => setAllRecipesContentWidth(width)}
+            onScroll={updateAllRecipesOffset}
+            scrollEventThrottle={16}>
+            {visibleRecipes.map((recipe) => (
               <Pressable
                 key={recipe.id}
                 style={appStyles.smallCard}
@@ -94,6 +140,7 @@ export default function AppHomeScreen() {
               </Pressable>
             ))}
           </ScrollView>
+          </> : null}
         </ScrollView>
       </SafeAreaView>
       <AppBottomNav />

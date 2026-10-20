@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import {
   addRecipeToList as addRecipeToListRequest,
   addShoppingItem as addShoppingItemRequest,
+  addShoppingItems as addShoppingItemsRequest,
   clearAuthToken,
   createRecipeList as createRecipeListRequest,
   deleteShoppingItem as deleteShoppingItemRequest,
@@ -10,6 +11,7 @@ import {
   getPersonalRecipeState,
   removeRecipeFromList as removeRecipeFromListRequest,
   setRecipeSaved as setRecipeSavedRequest,
+  setHiddenIngredients as setHiddenIngredientsRequest,
   updateShoppingItem as updateShoppingItemRequest,
   type AuthUser,
   type SavedRecipeList,
@@ -22,9 +24,12 @@ type AppStateValue = {
   personalDataLoading: boolean;
   personalDataError: string;
   shoppingItems: ShoppingListItem[];
+  hiddenIngredients: string[];
   savedRecipeIds: string[];
   savedLists: SavedRecipeList[];
   addIngredient: (ingredient: string) => Promise<void>;
+  addIngredients: (ingredients: string[]) => Promise<void>;
+  setHiddenIngredients: (ingredients: string[]) => Promise<void>;
   toggleSavedRecipe: (recipeId: string, saved?: boolean) => Promise<void>;
   createList: (name: string) => Promise<void>;
   saveRecipeToList: (recipeId: string, listId?: string) => Promise<void>;
@@ -43,6 +48,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [personalDataReadyForUser, setPersonalDataReadyForUser] = useState<string | null>(null);
   const [personalDataError, setPersonalDataError] = useState('');
   const [shoppingItems, setShoppingItems] = useState<ShoppingListItem[]>([]);
+  const [hiddenIngredients, setHiddenIngredientsState] = useState<string[]>([]);
   const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
   const [savedLists, setSavedLists] = useState<SavedRecipeList[]>([]);
 
@@ -67,13 +73,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     let active = true;
     const state = user
       ? getPersonalRecipeState()
-      : Promise.resolve({ savedRecipeIds: [], savedLists: [], shoppingItems: [] });
+      : Promise.resolve({ savedRecipeIds: [], savedLists: [], shoppingItems: [], hiddenIngredients: [] });
     state
       .then((data) => {
         if (!active) return;
         setSavedRecipeIds(data.savedRecipeIds);
         setSavedLists(data.savedLists);
         setShoppingItems(data.shoppingItems);
+        setHiddenIngredientsState(data.hiddenIngredients);
         setPersonalDataError('');
         setPersonalDataReadyForUser(user?.id ?? null);
       })
@@ -94,12 +101,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     personalDataLoading: Boolean(user && personalDataReadyForUser !== user.id),
     personalDataError,
     shoppingItems,
+    hiddenIngredients,
     savedRecipeIds,
     savedLists,
     addIngredient: async (ingredient) => {
       if (!user) throw new Error('Entre na sua conta para salvar itens na lista de compras.');
       const item = await addShoppingItemRequest(ingredient);
       setShoppingItems((current) => [...current, item]);
+    },
+    addIngredients: async (ingredients) => {
+      if (!user) throw new Error('Entre na sua conta para salvar itens na lista de compras.');
+      const items = await addShoppingItemsRequest(ingredients);
+      setShoppingItems((current) => [...current, ...items]);
+    },
+    setHiddenIngredients: async (ingredients) => {
+      if (!user) throw new Error('Entre na sua conta para configurar suas restrições alimentares.');
+      const savedIngredients = await setHiddenIngredientsRequest(ingredients);
+      setHiddenIngredientsState(savedIngredients);
     },
     toggleSavedRecipe: async (recipeId, saved) => {
       if (!user) throw new Error('Entre na sua conta para salvar receitas.');
@@ -143,8 +161,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setSavedRecipeIds([]);
       setSavedLists([]);
       setShoppingItems([]);
+      setHiddenIngredientsState([]);
     },
-  }), [authLoading, personalDataError, personalDataReadyForUser, savedLists, savedRecipeIds, shoppingItems, user]);
+  }), [authLoading, hiddenIngredients, personalDataError, personalDataReadyForUser, savedLists, savedRecipeIds, shoppingItems, user]);
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }

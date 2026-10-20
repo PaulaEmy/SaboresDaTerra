@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
   INDEX idx_recipe_ingredients_position (recipe_id, position)
 );
 
+CREATE TABLE IF NOT EXISTS recipe_tags (
+  recipe_id CHAR(36) NOT NULL,
+  tag VARCHAR(40) NOT NULL,
+  PRIMARY KEY (recipe_id, tag),
+  CONSTRAINT fk_recipe_tags_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+  INDEX idx_recipe_tags_tag (tag)
+);
+
 CREATE TABLE IF NOT EXISTS recipe_steps (
   id CHAR(36) NOT NULL PRIMARY KEY,
   recipe_id CHAR(36) NOT NULL,
@@ -138,4 +146,11 @@ CREATE TABLE IF NOT EXISTS shopping_list_items (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_shopping_list_items_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_shopping_list_user_created (user_id, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS user_hidden_ingredients (
+  user_id CHAR(36) NOT NULL,
+  ingredient VARCHAR(160) NOT NULL,
+  PRIMARY KEY (user_id, ingredient),
+  CONSTRAINT fk_user_hidden_ingredients_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
