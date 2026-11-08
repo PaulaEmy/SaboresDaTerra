@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useNetworkState } from 'expo-network';
 
 import {
   addRecipeToList as addRecipeToListRequest,
@@ -9,27 +10,39 @@ import {
   deleteShoppingItem as deleteShoppingItemRequest,
   getCurrentUser,
   getPersonalRecipeState,
+  getRecipeOnline,
   removeRecipeFromList as removeRecipeFromListRequest,
   setRecipeSaved as setRecipeSavedRequest,
   setHiddenIngredients as setHiddenIngredientsRequest,
+  setPreferredTags as setPreferredTagsRequest,
   updateShoppingItem as updateShoppingItemRequest,
   type AuthUser,
+  type Recipe,
   type SavedRecipeList,
   type ShoppingListItem,
 } from '@/services/auth-api';
+import { deleteOfflineRecipe, getOfflineRecipes, saveOfflineRecipe } from '@/services/offline-recipes';
 
 type AppStateValue = {
   user: AuthUser | null;
   authLoading: boolean;
+  authError: string;
   personalDataLoading: boolean;
   personalDataError: string;
+  offlineSyncError: string;
+  isOnline: boolean | null;
   shoppingItems: ShoppingListItem[];
   hiddenIngredients: string[];
+  preferredTags: string[];
+  offlineRecipes: Recipe[];
   savedRecipeIds: string[];
   savedLists: SavedRecipeList[];
   addIngredient: (ingredient: string) => Promise<void>;
   addIngredients: (ingredients: string[]) => Promise<void>;
   setHiddenIngredients: (ingredients: string[]) => Promise<void>;
+  setPreferredTags: (tags: string[]) => Promise<void>;
+  saveRecipeOffline: (recipe: Recipe) => Promise<void>;
+  removeOfflineRecipe: (recipeId: string) => Promise<void>;
   toggleSavedRecipe: (recipeId: string, saved?: boolean) => Promise<void>;
   createList: (name: string) => Promise<void>;
   saveRecipeToList: (recipeId: string, listId?: string) => Promise<void>;
@@ -43,23 +56,37 @@ type AppStateValue = {
 const AppStateContext = createContext<AppStateValue | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
+  const networkState = useNetworkState();
+  const isOnline = networkState.isInternetReachable ?? networkState.isConnected ?? null;
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
   const [personalDataReadyForUser, setPersonalDataReadyForUser] = useState<string | null>(null);
   const [personalDataError, setPersonalDataError] = useState('');
+  const [offlineSyncError, setOfflineSyncError] = useState('');
   const [shoppingItems, setShoppingItems] = useState<ShoppingListItem[]>([]);
   const [hiddenIngredients, setHiddenIngredientsState] = useState<string[]>([]);
+  const [preferredTags, setPreferredTagsState] = useState<string[]>([]);
+  const [offlineRecipes, setOfflineRecipes] = useState<Recipe[]>([]);
+  const [offlineRecipesOwnerId, setOfflineRecipesOwnerId] = useState<string | null>(null);
   const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
   const [savedLists, setSavedLists] = useState<SavedRecipeList[]>([]);
+  const previousOnline = useRef<boolean | null>(isOnline);
 
   useEffect(() => {
     let active = true;
     getCurrentUser()
       .then((currentUser) => {
-        if (active) setUser(currentUser);
+        if (active) {
+          setUser(currentUser);
+          setAuthError('');
+        }
       })
-      .catch(() => {
-        if (active) setUser(null);
+      .catch((error: unknown) => {
+        if (active) {
+          setUser(null);
+          setAuthError(error instanceof Error ? error.message : 'Não foi possível restaurar sua sessão.');
+        }
       })
       .finally(() => {
         if (active) setAuthLoading(false);
@@ -73,7 +100,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     let active = true;
     const state = user
       ? getPersonalRecipeState()
-      : Promise.resolve({ savedRecipeIds: [], savedLists: [], shoppingItems: [], hiddenIngredients: [] });
+      : Promise.resolve({ savedRecipeIds: [], savedLists: [], shoppingItems: [], hiddenIngredients: [], preferredTags: [] });
     state
       .then((data) => {
         if (!active) return;
@@ -81,6 +108,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setSavedLists(data.savedLists);
         setShoppingItems(data.shoppingItems);
         setHiddenIngredientsState(data.hiddenIngredients);
+        setPreferredTagsState(data.preferredTags);
         setPersonalDataError('');
         setPersonalDataReadyForUser(user?.id ?? null);
       })
@@ -95,13 +123,56 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  useEffect(() => {
+    let active = true;
+    if (!user) return () => { active = false; };
+    getOfflineRecipes(user.id)
+      .then((recipes) => {
+        if (active) {
+          setOfflineRecipes(recipes);
+          setOfflineRecipesOwnerId(user.id);
+          setOfflineSyncError('');
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setOfflineSyncError(error instanceof Error ? error.message : 'Não foi possível carregar as receitas offline.');
+      });
+    return () => { active = false; };
+  }, [user]);
+
+  useEffect(() => {
+    const shouldRefresh = isOnline === true && previousOnline.current !== true;
+    previousOnline.current = isOnline;
+    if (!shouldRefresh || !user) return;
+    let active = true;
+    (async () => {
+      try {
+        const cachedRecipes = await getOfflineRecipes(user.id);
+        const refreshedRecipes = await Promise.all(cachedRecipes.map((recipe) => getRecipeOnline(recipe.id)));
+        const storedRecipes = await Promise.all(refreshedRecipes.map((recipe) => saveOfflineRecipe(user.id, recipe)));
+        if (active) {
+          setOfflineRecipes(storedRecipes);
+          setOfflineSyncError('');
+        }
+      } catch (error) {
+        if (active) setOfflineSyncError(error instanceof Error ? error.message : 'Não foi possível sincronizar as receitas offline.');
+      }
+    })();
+    return () => { active = false; };
+  }, [isOnline, user]);
+
   const value = useMemo<AppStateValue>(() => ({
     user,
     authLoading,
+    authError,
     personalDataLoading: Boolean(user && personalDataReadyForUser !== user.id),
     personalDataError,
+    offlineSyncError,
+    isOnline,
     shoppingItems,
     hiddenIngredients,
+    preferredTags,
+    offlineRecipes: offlineRecipesOwnerId === user?.id ? offlineRecipes : [],
     savedRecipeIds,
     savedLists,
     addIngredient: async (ingredient) => {
@@ -118,6 +189,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!user) throw new Error('Entre na sua conta para configurar suas restrições alimentares.');
       const savedIngredients = await setHiddenIngredientsRequest(ingredients);
       setHiddenIngredientsState(savedIngredients);
+    },
+    setPreferredTags: async (tags) => {
+      if (!user) throw new Error('Entre na sua conta para configurar suas preferências.');
+      const savedTags = await setPreferredTagsRequest(tags);
+      setPreferredTagsState(savedTags);
+    },
+    saveRecipeOffline: async (recipe) => {
+      if (!user) throw new Error('Entre na sua conta para salvar receitas offline.');
+      const savedRecipe = await saveOfflineRecipe(user.id, recipe);
+      setOfflineRecipes((current) => [
+        ...current.filter((item) => item.id !== savedRecipe.id),
+        savedRecipe,
+      ]);
+      setOfflineRecipesOwnerId(user.id);
+    },
+    removeOfflineRecipe: async (recipeId) => {
+      if (!user) throw new Error('Entre na sua conta para gerenciar receitas offline.');
+      await deleteOfflineRecipe(user.id, recipeId);
+      setOfflineRecipes((current) => current.filter((recipe) => recipe.id !== recipeId));
     },
     toggleSavedRecipe: async (recipeId, saved) => {
       if (!user) throw new Error('Entre na sua conta para salvar receitas.');
@@ -154,7 +244,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       await deleteShoppingItemRequest(itemId);
       setShoppingItems((current) => current.filter((item) => item.id !== itemId));
     },
-    setAuthenticatedUser: setUser,
+    setAuthenticatedUser: (authenticatedUser) => {
+      setAuthError('');
+      setUser(authenticatedUser);
+    },
     signOut: async () => {
       await clearAuthToken();
       setUser(null);
@@ -162,8 +255,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setSavedLists([]);
       setShoppingItems([]);
       setHiddenIngredientsState([]);
+      setPreferredTagsState([]);
+      setOfflineRecipes([]);
+      setOfflineRecipesOwnerId(null);
+      setAuthError('');
     },
-  }), [authLoading, hiddenIngredients, personalDataError, personalDataReadyForUser, savedLists, savedRecipeIds, shoppingItems, user]);
+  }), [authError, authLoading, hiddenIngredients, isOnline, offlineRecipes, offlineRecipesOwnerId, offlineSyncError, personalDataError, personalDataReadyForUser, preferredTags, savedLists, savedRecipeIds, shoppingItems, user]);
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }

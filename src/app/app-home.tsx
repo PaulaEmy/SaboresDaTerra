@@ -5,12 +5,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { useAppState } from '@/components/app-state';
-import { getRecipeMediaUrl, searchRecipes, type RecipeSummary } from '@/services/auth-api';
+import { getRecipeMediaUrl, getRecommendations, searchRecipes, type RecipeSummary, type RecommendedRecipe } from '@/services/auth-api';
+import { cancelDailyRecipeSuggestions, hasDailyRecipeSuggestion, scheduleDailyRecipeSuggestion } from '@/services/recipe-notifications';
 import { appStyles } from '@/styles/app.styles';
 
 export default function AppHomeScreen() {
-  const { user, hiddenIngredients, personalDataError, personalDataLoading } = useAppState();
+  const { user, hiddenIngredients, preferredTags, personalDataError, personalDataLoading } = useAppState();
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
+  const [recommendedRecipes, setRecommendedRecipes] = useState<RecommendedRecipe[]>([]);
+  const [recommendedForUser, setRecommendedForUser] = useState<string | null>(null);
+  const [recommendationError, setRecommendationError] = useState('');
+  const [notificationSyncError, setNotificationSyncError] = useState('');
   const [loadError, setLoadError] = useState('');
   const allRecipesList = useRef<ScrollView>(null);
   const [allRecipesListWidth, setAllRecipesListWidth] = useState(0);
@@ -24,7 +29,35 @@ export default function AppHomeScreen() {
       .then((items) => { if (active) setRecipes(items); })
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Não foi possível carregar receitas.'); });
     return () => { active = false; };
-  }, [hiddenIngredients, personalDataError, personalDataLoading]);
+  }, [personalDataError, personalDataLoading]);
+
+  useEffect(() => {
+    if (!user || personalDataLoading || personalDataError) return;
+    let active = true;
+    getRecommendations()
+      .then(async (items) => {
+        if (active) {
+          setRecommendedRecipes(items);
+          setRecommendedForUser(user.id);
+          setRecommendationError('');
+        }
+        try {
+          if (await hasDailyRecipeSuggestion()) {
+            if (items[0]) await scheduleDailyRecipeSuggestion(items[0]);
+            else await cancelDailyRecipeSuggestions();
+          }
+          if (active) setNotificationSyncError('');
+        } catch (notificationError) {
+          if (active) setNotificationSyncError(notificationError instanceof Error ? notificationError.message : 'Não foi possível atualizar a sugestão diária.');
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setRecommendationError(error instanceof Error ? error.message : 'Não foi possível carregar recomendações.');
+      });
+    return () => { active = false; };
+  }, [hiddenIngredients, personalDataError, personalDataLoading, preferredTags, user]);
+
+  const hasCurrentRecommendations = Boolean(user && recommendedForUser === user.id);
 
   const visibleRecipes = personalDataError ? [] : recipes;
   const seasonalRecipes = visibleRecipes.slice(0, 5);
@@ -64,6 +97,35 @@ export default function AppHomeScreen() {
             <Text style={appStyles.shoppingIcon}>♧</Text>
             <Text style={appStyles.shoppingLabel}>MINHA LISTA DE COMPRAS</Text>
           </Pressable>
+
+          <View style={appStyles.sectionHeader}>
+            <Text style={appStyles.sectionTitle}>Recomendadas para você</Text>
+          </View>
+          {!user ? <Text style={appStyles.emptyState}>Entre na sua conta para receber recomendações personalizadas.</Text> : null}
+          {user && preferredTags.length === 0 ? <Text style={appStyles.emptyState}>Escolha suas preferências no perfil para personalizar as recomendações.</Text> : null}
+          {recommendationError ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{recommendationError}</Text> : null}
+          {notificationSyncError ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{notificationSyncError}</Text> : null}
+          {user && preferredTags.length > 0 && hasCurrentRecommendations && !recommendationError && recommendedRecipes.length === 0
+            ? <Text style={appStyles.emptyState}>Ainda não há receitas compatíveis com suas preferências e restrições.</Text>
+            : null}
+          {hasCurrentRecommendations && recommendedRecipes.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={appStyles.horizontalList}>
+              {recommendedRecipes.map((recipe) => (
+                <Pressable
+                  key={recipe.id}
+                  style={appStyles.smallCard}
+                  onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
+                  <View style={appStyles.smallImage}>
+                    {recipe.imageUrl
+                      ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.smallPhoto} resizeMode="cover" />
+                      : <Text style={appStyles.imageIcon}>♨</Text>}
+                  </View>
+                  <Text style={appStyles.smallTitle}>{recipe.title}</Text>
+                  <Text style={appStyles.featureMeta}>{recipe.reason}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
 
           <View style={appStyles.sectionHeader}>
             <Text style={appStyles.sectionTitle}>Receitas da Estação</Text>

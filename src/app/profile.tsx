@@ -5,15 +5,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { useAppState } from '@/components/app-state';
+import { dietaryTags } from '@/constants/diet-tags';
+import { getRecommendations } from '@/services/auth-api';
+import { cancelDailyRecipeSuggestions, hasDailyRecipeSuggestion, scheduleDailyRecipeSuggestion } from '@/services/recipe-notifications';
 import { profileStyles as styles } from '@/styles/profile.styles';
 
-const menuItems = ['Minhas receitas', 'Salvas', 'Histórico', 'Ajuda'];
+const menuItems = [
+  { label: 'Minhas receitas', path: '/my-recipes' as const },
+  { label: 'Salvas', path: '/favorites' as const },
+  { label: 'Receitas offline', path: '/offline' as const },
+];
 
 export default function ProfileScreen() {
-  const { user, hiddenIngredients, personalDataError, personalDataLoading, setHiddenIngredients, signOut } = useAppState();
+  const { user, authError, hiddenIngredients, preferredTags, personalDataError, personalDataLoading, setHiddenIngredients, setPreferredTags, signOut } = useAppState();
   const [ingredientInput, setIngredientInput] = useState('');
   const [restrictionError, setRestrictionError] = useState('');
+  const [preferenceError, setPreferenceError] = useState('');
+  const [notificationError, setNotificationError] = useState('');
   const [savingRestrictions, setSavingRestrictions] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
 
   async function handleSignOut() {
     await signOut();
@@ -29,8 +39,15 @@ export default function ProfileScreen() {
       await setHiddenIngredients(ingredients);
     } catch (error) {
       setRestrictionError(error instanceof Error ? error.message : 'Não foi possível salvar as restrições.');
+      return;
     } finally {
       setSavingRestrictions(false);
+    }
+    try {
+      await refreshScheduledSuggestion();
+      setNotificationError('');
+    } catch (error) {
+      setNotificationError(error instanceof Error ? `Restrições salvas, mas não foi possível atualizar a sugestão diária: ${error.message}` : 'Restrições salvas, mas não foi possível atualizar a sugestão diária.');
     }
   }
 
@@ -46,6 +63,36 @@ export default function ProfileScreen() {
     void updateRestrictions([...hiddenIngredients, ingredient]);
   }
 
+  async function togglePreference(tag: string) {
+    if (!user || savingPreferences || personalDataError || personalDataLoading) return;
+    const updatedTags = preferredTags.includes(tag)
+      ? preferredTags.filter((item) => item !== tag)
+      : [...preferredTags, tag];
+    setSavingPreferences(true);
+    setPreferenceError('');
+    try {
+      await setPreferredTags(updatedTags);
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : 'Não foi possível salvar suas preferências.');
+      return;
+    } finally {
+      setSavingPreferences(false);
+    }
+    try {
+      await refreshScheduledSuggestion();
+      setNotificationError('');
+    } catch (error) {
+      setNotificationError(error instanceof Error ? `Preferências salvas, mas não foi possível atualizar a sugestão diária: ${error.message}` : 'Preferências salvas, mas não foi possível atualizar a sugestão diária.');
+    }
+  }
+
+  async function refreshScheduledSuggestion() {
+    if (!await hasDailyRecipeSuggestion()) return;
+    const recommendations = await getRecommendations();
+    if (recommendations[0]) await scheduleDailyRecipeSuggestion(recommendations[0]);
+    else await cancelDailyRecipeSuggestions();
+  }
+
   return (
     <View style={styles.screen}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -56,10 +103,11 @@ export default function ProfileScreen() {
               <Text style={styles.name}>{displayName}</Text>
               <Text style={styles.email}>{user?.email ?? ''}</Text>
             </View>
+            {authError ? <Text accessibilityRole="alert" style={styles.errorText}>{authError}</Text> : null}
           </View>
           {menuItems.map((item) => (
-            <Pressable key={item} style={styles.menuItem} onPress={item === 'Minhas receitas' ? () => router.push('/my-recipes') : undefined}>
-              <Text style={styles.menuText}>{item}</Text>
+            <Pressable key={item.label} style={styles.menuItem} onPress={() => router.push(item.path)}>
+              <Text style={styles.menuText}>{item.label}</Text>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
           ))}
@@ -68,8 +116,32 @@ export default function ProfileScreen() {
             <Text style={styles.chevron}>›</Text>
           </Pressable>
           <View style={styles.restrictionsCard}>
+            <Text style={styles.restrictionsTitle}>Preferências alimentares</Text>
+            <Text style={styles.restrictionsDescription}>Escolha os tipos de receita que devem aparecer nas recomendações. A busca continua mostrando todas as receitas.</Text>
+            <View style={styles.preferenceChoices}>
+              {dietaryTags.map((tag) => {
+                const selected = preferredTags.includes(tag);
+                return (
+                  <Pressable
+                    key={tag}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected, disabled: !user || savingPreferences || personalDataLoading || Boolean(personalDataError) }}
+                    disabled={!user || savingPreferences || personalDataLoading || Boolean(personalDataError)}
+                    onPress={() => void togglePreference(tag)}
+                    style={[styles.preferenceChoice, selected && styles.preferenceChoiceSelected]}>
+                    <Text style={[styles.preferenceChoiceText, selected && styles.preferenceChoiceTextSelected]}>{tag}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!user ? <Text style={styles.restrictionsDescription}>Entre na sua conta para salvar suas preferências.</Text> : null}
+            {savingPreferences ? <Text style={styles.restrictionsDescription}>Salvando preferências...</Text> : null}
+            {preferenceError ? <Text accessibilityRole="alert" style={styles.errorText}>{preferenceError}</Text> : null}
+            {notificationError ? <Text accessibilityRole="alert" style={styles.errorText}>{notificationError}</Text> : null}
+          </View>
+          <View style={styles.restrictionsCard}>
             <Text style={styles.restrictionsTitle}>Restrições alimentares</Text>
-            <Text style={styles.restrictionsDescription}>Esconda ingredientes das recomendações. Se pesquisar por um deles, as receitas correspondentes ainda aparecem.</Text>
+            <Text style={styles.restrictionsDescription}>Receitas que contenham estes ingredientes serão excluídas das recomendações. A busca continuará mostrando os resultados; confira sempre os ingredientes e rótulos, pois isso não garante segurança contra alergênicos.</Text>
             {!user ? <Text style={styles.restrictionsDescription}>Entre na sua conta para salvar suas restrições.</Text> : null}
             {personalDataLoading ? <Text style={styles.restrictionsDescription}>Carregando preferências...</Text> : null}
             {personalDataError ? <Text accessibilityRole="alert" style={styles.errorText}>{personalDataError}</Text> : null}

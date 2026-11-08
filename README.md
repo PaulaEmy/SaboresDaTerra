@@ -179,6 +179,15 @@ O sistema poderá recomendar receitas com base em:
 - Região aproximada.
 - Ingredientes disponíveis.
 
+### 📌 Regras de negócio implementadas
+
+- As categorias alimentares (Vegano, Vegetariano, Sem glúten, Sem lactose e Low Carb) são as mesmas no perfil, no cadastro de receitas e na busca. A busca combina nome/ingrediente, dieta, tempo, dificuldade e tag; restrições do perfil não ocultam resultados da busca.
+- Ingredientes restritos são excluídos das recomendações e geram um aviso na página da receita. Isso não substitui a leitura de rótulos nem garante proteção contra alergênicos ou contaminação cruzada.
+- As substituições vêm de um catálogo curado, consideram a categoria Vegano quando aplicável e são apenas sugestões: não modificam a receita original e podem alterar sabor ou textura.
+- Uma avaliação contém nota de 1 a 5 e comentário opcional. O autor pode editar ou excluir a própria avaliação; comentários da comunidade continuam sendo uma interação separada.
+- Receitas salvas para acesso offline guardam localmente ingredientes, quantidades, passos e avaliações. Mídia e ações que alteram dados ainda precisam de conexão; o conteúdo salvo é atualizado ao reconectar.
+- As sugestões notificadas são locais e diárias, às 10h, no aplicativo Android/iOS. Ao abrir o app com conexão, o agendamento acompanha as preferências e restrições atuais. Notificações push enviadas por um servidor não estão configuradas.
+
 ### 📱 Experiência mobile
 
 O aplicativo foi planejado para dispositivos móveis, oferecendo:
@@ -392,7 +401,7 @@ A API usa Node.js 20+, Express e MySQL 8. O cadastro fica pendente até a pessoa
 
 Endpoints disponíveis: `POST /api/auth/register`, `POST /api/auth/resend-verification`, `POST /api/auth/verify`, `POST /api/auth/login`, `GET /api/auth/me` e `GET /health`. A conta só é criada quando a pessoa confirma o link enviado por email. Para produção, configure HTTPS, SMTP real, `APP_ORIGINS` com as origens do app e segredos próprios; não use os valores de exemplo.
 
-O catálogo e os detalhes vêm das tabelas MySQL `recipes`, `recipe_ingredients`, `recipe_tags`, `recipe_steps` e `recipe_media`. Comentários, avaliações, denúncias, favoritos, listas, ingredientes escondidos e compras também são persistidos por usuário. Autores podem marcar receitas com tags sugeridas ou personalizadas; a busca aceita texto, ingredientes e tags, e aplica as preferências de ingredientes escondidos sem ocultá-las quando a busca corresponde ao ingrediente. Na página de uma receita, todos os ingredientes podem ser adicionados de uma vez à lista de compras, mantendo os itens e quantidades já existentes. A API oferece `GET /api/recipes`, `GET /api/recipes/:id`, `GET /api/recipes/mine` e operações autenticadas para criar e interagir com receitas. Áudio e vídeo (até 100 MB por arquivo) ficam em `backend/uploads/`; o desenvolvimento usa disco local, enquanto produção deve usar armazenamento de objetos.
+O catálogo e os detalhes vêm das tabelas MySQL `recipes`, `recipe_ingredients`, `recipe_tags`, `recipe_steps` e `recipe_media`. Comentários, avaliações, denúncias, favoritos, listas, ingredientes escondidos e compras também são persistidos por usuário. Autores podem marcar receitas com tags sugeridas ou personalizadas; a busca aceita texto, ingredientes, tags e filtros combináveis de dieta, tempo e dificuldade. Ingredientes escondidos não removem receitas dos resultados gerais: são considerados nas recomendações personalizadas e geram um aviso na página da receita. Na página de uma receita, todos os ingredientes podem ser adicionados de uma vez à lista de compras, mantendo os itens e quantidades já existentes. A API oferece `GET /api/recipes`, `GET /api/recipes/:id`, `GET /api/recipes/mine` e operações autenticadas para criar e interagir com receitas. Áudio e vídeo (até 100 MB por arquivo) ficam em `backend/uploads/`; o desenvolvimento usa disco local, enquanto produção deve usar armazenamento de objetos.
 
 In the output, you'll find options to open the app in a
 

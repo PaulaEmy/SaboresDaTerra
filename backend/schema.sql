@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS recipe_ratings (
   recipe_id CHAR(36) NOT NULL,
   user_id CHAR(36) NOT NULL,
   rating TINYINT UNSIGNED NOT NULL,
+  review_comment VARCHAR(1000) NOT NULL DEFAULT '',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (recipe_id, user_id),
@@ -153,4 +154,11 @@ CREATE TABLE IF NOT EXISTS user_hidden_ingredients (
   ingredient VARCHAR(160) NOT NULL,
   PRIMARY KEY (user_id, ingredient),
   CONSTRAINT fk_user_hidden_ingredients_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_preferred_tags (
+  user_id CHAR(36) NOT NULL,
+  tag VARCHAR(40) NOT NULL,
+  PRIMARY KEY (user_id, tag),
+  CONSTRAINT fk_user_preferred_tags_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

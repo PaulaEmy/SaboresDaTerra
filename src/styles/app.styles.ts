@@ -274,4 +274,6 @@ export const appStyles = StyleSheet.create({
   folderName: { color: '#181816', fontFamily: Fonts.serif, fontSize: 20, fontStyle: 'italic' },
   folderCount: { color: Colors.clay, fontFamily: Fonts.sans, fontSize: 12, fontWeight: '700' },
   emptyState: { color: '#756F65', fontFamily: Fonts.sans, fontSize: 16, textAlign: 'center', marginTop: 30 },
+  offlineRecipeCard: { padding: 18, borderRadius: 22, backgroundColor: '#FFFFFF', borderColor: '#EDE5D7', borderWidth: 1, marginTop: 14, gap: 12 },
+  offlineRemove: { color: Colors.clay, fontFamily: Fonts.sans, fontSize: 14, fontWeight: '700', alignSelf: 'flex-end' },
 });
