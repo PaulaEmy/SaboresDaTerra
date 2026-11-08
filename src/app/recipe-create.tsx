@@ -5,11 +5,12 @@ import { Image, Platform, Pressable, Text, TextInput, View } from 'react-native'
 import * as ImagePicker from 'expo-image-picker';
 
 import { AuthHeader, AuthScreen, Field, PrimaryButton } from '@/components/auth-ui';
+import { dietaryTags } from '@/constants/diet-tags';
 import { createRecipe, getRecipe, updateRecipe, uploadRecipeMedia, type RecipeMediaUpload, type UserRecipe } from '@/services/auth-api';
 import { userRecipesStyles as styles } from '@/styles/user-recipes.styles';
 
 const difficultyOptions: UserRecipe['difficulty'][] = ['Fácil', 'Médio', 'Difícil'];
-const suggestedTags = ['Dieta', 'Vegetariano', 'Vegano', 'Low Carb'];
+const suggestedTags = dietaryTags;
 
 export default function CreateRecipeScreen() {
   const { editId } = useLocalSearchParams<{ editId?: string }>();
@@ -227,7 +228,7 @@ export default function CreateRecipeScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Tags da receita</Text>
-        <Text style={styles.tagDescription}>Escolha as categorias e adicione tags personalizadas.</Text>
+        <Text style={styles.tagDescription}>Marque as categorias alimentares para melhorar busca, recomendações e substituições. Também é possível adicionar tags personalizadas.</Text>
         <View style={styles.tagChoices}>
           {suggestedTags.map((tag) => {
             const selected = tags.some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase());

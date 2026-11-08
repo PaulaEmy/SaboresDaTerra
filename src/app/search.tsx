@@ -4,38 +4,34 @@ import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
-import { useAppState } from '@/components/app-state';
+import { dietaryTags } from '@/constants/diet-tags';
 import { getRecipeMediaUrl, searchRecipes, type RecipeSummary } from '@/services/auth-api';
 import { appStyles } from '@/styles/app.styles';
 
-const suggestedTags = ['Dieta', 'Vegetariano', 'Vegano', 'Low Carb'];
-
 export default function SearchScreen() {
-  const { hiddenIngredients, personalDataError, personalDataLoading } = useAppState();
   const [ingredient, setIngredient] = useState('');
   const [tagQuery, setTagQuery] = useState('');
   const [time, setTime] = useState('');
   const [difficulty, setDifficulty] = useState('Qualquer');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [diet, setDiet] = useState('');
   const [openFilter, setOpenFilter] = useState<'difficulty' | null>(null);
   const [filteredRecipes, setFilteredRecipes] = useState<RecipeSummary[]>([]);
   const [error, setError] = useState('');
   const difficultyOptions = ['Qualquer', 'Fácil', 'Médio', 'Difícil'];
 
   useEffect(() => {
-    if (personalDataLoading || personalDataError) return;
     let active = true;
     searchRecipes({
       query: ingredient,
       maxTime: Number(time) || undefined,
       difficulty,
-      tags: selectedTags,
+      diet,
       tagQuery,
     })
       .then((items) => { if (active) { setFilteredRecipes(items); setError(''); } })
       .catch((loadError: unknown) => { if (active) setError(loadError instanceof Error ? loadError.message : 'Não foi possível buscar receitas.'); });
     return () => { active = false; };
-  }, [difficulty, hiddenIngredients, ingredient, personalDataError, personalDataLoading, selectedTags, tagQuery, time]);
+  }, [diet, difficulty, ingredient, tagQuery, time]);
   return (
     <View style={appStyles.screen}>
       <SafeAreaView style={appStyles.safeArea} edges={['top']}>
@@ -49,20 +45,21 @@ export default function SearchScreen() {
           <TextInput value={time} onChangeText={(value) => setTime(value.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder="Digite o tempo máximo em minutos" placeholderTextColor="#77736C" style={appStyles.filterInput} />
           <Text style={appStyles.filterLabel}>DIFICULDADE</Text>
           <View style={appStyles.dropdownWrapper}><Pressable style={appStyles.filterButton} onPress={() => setOpenFilter(openFilter === 'difficulty' ? null : 'difficulty')}><Text style={appStyles.filterText}>{difficulty}</Text><Text style={appStyles.dropdownArrow}>⌄</Text></Pressable>{openFilter === 'difficulty' && <DropdownOptions options={difficultyOptions} onSelect={(value) => { setDifficulty(value); setOpenFilter(null); }} />}</View>
-          <Text style={appStyles.filterLabel}>TAGS</Text>
+          <Text style={appStyles.filterLabel}>TIPO DE DIETA</Text>
           <View style={appStyles.tagChoices}>
-            {suggestedTags.map((tag) => {
-              const selected = selectedTags.includes(tag);
+            {dietaryTags.map((option) => {
+              const selected = diet === option;
               return (
                 <Pressable
-                  key={tag}
-                  onPress={() => setSelectedTags((current) => selected ? current.filter((item) => item !== tag) : [...current, tag])}
+                  key={option}
+                  onPress={() => setDiet(selected ? '' : option)}
                   style={[appStyles.tagChoice, selected && appStyles.tagChoiceSelected]}>
-                  <Text style={[appStyles.tagChoiceText, selected && appStyles.tagChoiceTextSelected]}>{tag}</Text>
+                  <Text style={[appStyles.tagChoiceText, selected && appStyles.tagChoiceTextSelected]}>{option}</Text>
                 </Pressable>
               );
             })}
           </View>
+          <Text style={appStyles.filterLabel}>OUTRAS TAGS</Text>
           <TextInput
             value={tagQuery}
             onChangeText={setTagQuery}
@@ -73,10 +70,10 @@ export default function SearchScreen() {
             returnKeyType="search"
           />
           <View style={appStyles.sectionHeader}>
-            <Text style={appStyles.sectionTitle}>{personalDataError ? '— receitas' : `${filteredRecipes.length} receitas`}</Text>
+            <Text style={appStyles.sectionTitle}>{`${filteredRecipes.length} receitas`}</Text>
           </View>
-          {personalDataError || error ? <Text style={appStyles.emptyState}>{personalDataError || error}</Text> : null}
-          {!personalDataError && filteredRecipes.map((recipe) => (
+          {error ? <Text style={appStyles.emptyState}>{error}</Text> : null}
+          {filteredRecipes.map((recipe) => (
             <Pressable key={recipe.id} style={[appStyles.smallCard, { width: '100%', marginBottom: 16 }]} onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
               <View style={appStyles.smallImage}>
                 {recipe.imageUrl ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.smallPhoto} resizeMode="cover" /> : <Text style={appStyles.imageIcon}>♨</Text>}
@@ -86,7 +83,7 @@ export default function SearchScreen() {
               {recipe.tags.length ? <Text style={appStyles.recipeTags}>{recipe.tags.join(' · ')}</Text> : null}
             </Pressable>
           ))}
-          {!personalDataError && !error && filteredRecipes.length === 0 && <Text style={appStyles.emptyState}>Nenhuma receita encontrada com esses filtros.</Text>}
+          {!error && filteredRecipes.length === 0 && <Text style={appStyles.emptyState}>Nenhuma receita encontrada com esses filtros.</Text>}
         </ScrollView>
       </SafeAreaView>
       <AppBottomNav />

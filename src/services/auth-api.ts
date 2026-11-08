@@ -2,8 +2,13 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 
+import { getOfflineRecipe } from '@/services/offline-recipes';
+
 const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'sabores-da-terra-auth-token';
+const AUTH_USER_KEY = 'sabores-da-terra-auth-user';
+
+class ApiConnectionError extends Error {}
 
 export type AuthUser = {
   id: string;
@@ -49,8 +54,19 @@ export type Recipe = UserRecipe & {
   author: string;
   authorId: string;
   comments: RecipeComment[];
+  reviews: RecipeReview[];
+  userReview: { rating: number; comment: string } | null;
   averageRating: number | null;
   ratingCount: number;
+  offlineCopy?: boolean;
+};
+
+export type RecipeReview = {
+  userId: string;
+  author: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
 };
 
 export type RecipeSummary = Pick<UserRecipe, 'id' | 'title' | 'description' | 'prepTimeMinutes' | 'servings' | 'difficulty'> & {
@@ -68,7 +84,11 @@ export type PersonalRecipeState = {
   savedLists: SavedRecipeList[];
   shoppingItems: ShoppingListItem[];
   hiddenIngredients: string[];
+  preferredTags: string[];
 };
+
+export type RecommendedRecipe = RecipeSummary & { reason: string };
+export type IngredientSubstitution = { name: string; ratio: string; reason: string };
 
 export type RecipeMediaUpload = {
   uri: string;
@@ -102,6 +122,32 @@ async function storeToken(token: string) {
   await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
 }
 
+async function storeCachedUser(user: AuthUser) {
+  const serializedUser = JSON.stringify(user);
+  if (Platform.OS === 'web') {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(AUTH_USER_KEY, serializedUser);
+    return;
+  }
+  await SecureStore.setItemAsync(AUTH_USER_KEY, serializedUser);
+}
+
+async function getCachedUser(): Promise<AuthUser | null> {
+  const serializedUser = Platform.OS === 'web'
+    ? typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_USER_KEY) : null
+    : await SecureStore.getItemAsync(AUTH_USER_KEY);
+  if (!serializedUser) return null;
+  try {
+    const user: unknown = JSON.parse(serializedUser);
+    if (user && typeof user === 'object' && 'id' in user && 'name' in user && 'email' in user &&
+      typeof user.id === 'string' && typeof user.name === 'string' && typeof user.email === 'string') {
+      return { id: user.id, name: user.name, email: user.email };
+    }
+  } catch (error) {
+    throw new Error('Não foi possível ler os dados locais da conta.', { cause: error });
+  }
+  throw new Error('Os dados locais da conta estão inválidos.');
+}
+
 async function getToken() {
   if (Platform.OS === 'web') {
     return typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
@@ -111,10 +157,16 @@ async function getToken() {
 
 export async function clearAuthToken() {
   if (Platform.OS === 'web') {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(AUTH_TOKEN_KEY);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
+    }
     return;
   }
-  await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  await Promise.all([
+    SecureStore.deleteItemAsync(AUTH_TOKEN_KEY),
+    SecureStore.deleteItemAsync(AUTH_USER_KEY),
+  ]);
 }
 
 export async function register(name: string, email: string, password: string) {
@@ -124,6 +176,7 @@ export async function register(name: string, email: string, password: string) {
 export async function login(email: string, password: string) {
   const result = await request<LoginResponse>('/api/auth/login', { email, password });
   await storeToken(result.token);
+  await storeCachedUser(result.user);
   return result.user;
 }
 
@@ -137,6 +190,8 @@ export async function getCurrentUser() {
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
+    const cachedUser = await getCachedUser();
+    if (cachedUser) return cachedUser;
     throw new Error('Não foi possível conectar ao servidor para validar sua sessão.');
   }
 
@@ -146,8 +201,14 @@ export async function getCurrentUser() {
   }
 
   const result = await response.json().catch(() => ({}));
+  if (response.status >= 500) {
+    const cachedUser = await getCachedUser();
+    if (cachedUser) return cachedUser;
+  }
   if (!response.ok) throw new Error(result.error ?? 'Não foi possível validar sua sessão.');
-  return result.user as AuthUser;
+  const user = result.user as AuthUser;
+  await storeCachedUser(user);
+  return user;
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {
@@ -287,15 +348,19 @@ export async function searchRecipes(filters: {
   query?: string;
   maxTime?: number;
   difficulty?: string;
+  diet?: string;
   tags?: string[];
   tagQuery?: string;
+  excludeHidden?: boolean;
 }) {
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set('q', filters.query.trim());
   if (filters.maxTime) params.set('maxTime', String(filters.maxTime));
   if (filters.difficulty && filters.difficulty !== 'Qualquer') params.set('difficulty', filters.difficulty);
+  if (filters.diet) params.set('diet', filters.diet);
   filters.tags?.forEach((tag) => params.append('tag', tag));
   if (filters.tagQuery?.trim()) params.set('tagQuery', filters.tagQuery.trim());
+  if (filters.excludeHidden) params.set('excludeHidden', 'true');
   const query = params.toString();
   let response: Response;
   try {
@@ -311,16 +376,31 @@ export async function searchRecipes(filters: {
   return result.recipes as RecipeSummary[];
 }
 
-export async function getRecipe(recipeId: string) {
+export async function getRecipeOnline(recipeId: string) {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/api/recipes/${encodeURIComponent(recipeId)}`);
+    const token = await getToken();
+    response = await fetch(`${API_URL}/api/recipes/${encodeURIComponent(recipeId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
   } catch {
-    throw new Error('Não foi possível conectar ao servidor para carregar a receita.');
+    throw new ApiConnectionError('Não foi possível conectar ao servidor para carregar a receita.');
   }
   const result = await response.json().catch(() => ({}));
+  if (response.status >= 500) throw new ApiConnectionError(result.error ?? 'Não foi possível carregar a receita.');
   if (!response.ok) throw new Error(result.error ?? 'Não foi possível carregar a receita.');
   return result.recipe as Recipe;
+}
+
+export async function getRecipe(recipeId: string, offlineOwnerId?: string) {
+  try {
+    return await getRecipeOnline(recipeId);
+  } catch (error) {
+    if (!(error instanceof ApiConnectionError)) throw error;
+    const cachedRecipe = offlineOwnerId ? await getOfflineRecipe(recipeId, offlineOwnerId) : null;
+    if (cachedRecipe) return { ...cachedRecipe, offlineCopy: true };
+    throw error;
+  }
 }
 
 export async function addRecipeComment(recipeId: string, text: string) {
@@ -334,15 +414,22 @@ export async function addRecipeComment(recipeId: string, text: string) {
   return result.comment as RecipeComment;
 }
 
-export async function saveRecipeRating(recipeId: string, rating: number) {
+export async function saveRecipeRating(recipeId: string, rating: number, comment: string) {
   const response = await authenticatedFetch(`/api/recipes/${encodeURIComponent(recipeId)}/rating`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rating }),
+    body: JSON.stringify({ rating, comment }),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error ?? 'Não foi possível salvar a avaliação.');
-  return result as { averageRating: number | null; ratingCount: number };
+  return result as Pick<Recipe, 'averageRating' | 'ratingCount' | 'reviews' | 'userReview'>;
+}
+
+export async function deleteRecipeRating(recipeId: string) {
+  const response = await authenticatedFetch(`/api/recipes/${encodeURIComponent(recipeId)}/rating`, { method: 'DELETE' });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível excluir sua avaliação.');
+  return result as Pick<Recipe, 'averageRating' | 'ratingCount' | 'reviews' | 'userReview'>;
 }
 
 export async function getPersonalRecipeState() {
@@ -350,6 +437,37 @@ export async function getPersonalRecipeState() {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error ?? 'Não foi possível carregar seus dados.');
   return result as PersonalRecipeState;
+}
+
+export async function setPreferredTags(tags: string[]) {
+  const response = await authenticatedFetch('/api/me/preferred-tags', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível salvar suas preferências.');
+  return result.tags as string[];
+}
+
+export async function getRecommendations() {
+  const response = await authenticatedFetch('/api/recipes/recommendations');
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível carregar as recomendações.');
+  return result.recipes as RecommendedRecipe[];
+}
+
+export async function getIngredientSubstitutions(recipeId: string, ingredient: string) {
+  const params = new URLSearchParams({ ingredient });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/recipes/${encodeURIComponent(recipeId)}/substitutions?${params}`);
+  } catch {
+    throw new Error('Não foi possível conectar ao servidor para buscar substituições.');
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error ?? 'Não foi possível buscar substituições.');
+  return result as { ingredient: string; alternatives: IngredientSubstitution[]; message?: string };
 }
 
 export async function setRecipeSaved(recipeId: string, saved: boolean) {

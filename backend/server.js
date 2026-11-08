@@ -338,7 +338,7 @@ function optionalAuth(request, response, next) {
   }
 }
 
-async function getRecipeDetails(recipeId) {
+async function getRecipeDetails(recipeId, viewerId = null) {
   const [recipes] = await pool.execute(
     `SELECT r.id, r.user_id, r.title, r.description, r.prep_time_minutes, r.servings, r.difficulty,
        r.created_at, u.name AS author_name,
@@ -350,7 +350,7 @@ async function getRecipeDetails(recipeId) {
   if (!recipes.length) return null;
 
   const recipe = recipes[0];
-  const [[ingredients], [tags], [steps], [media], [comments]] = await Promise.all([
+  const [[ingredients], [tags], [steps], [media], [comments], [reviews]] = await Promise.all([
     pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipeId]),
     pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipeId]),
     pool.execute('SELECT instruction FROM recipe_steps WHERE recipe_id = ? ORDER BY position', [recipeId]),
@@ -361,7 +361,14 @@ async function getRecipeDetails(recipeId) {
        WHERE c.recipe_id = ? ORDER BY c.created_at`,
       [recipeId],
     ),
+    pool.execute(
+      `SELECT rr.user_id AS userId, u.name AS author, rr.rating, rr.review_comment AS comment, rr.created_at AS createdAt
+       FROM recipe_ratings rr JOIN users u ON u.id = rr.user_id
+       WHERE rr.recipe_id = ? ORDER BY rr.updated_at DESC`,
+      [recipeId],
+    ),
   ]);
+  const viewerReview = viewerId ? reviews.find((review) => review.userId === viewerId) : null;
 
   return {
     id: recipe.id,
@@ -383,28 +390,49 @@ async function getRecipeDetails(recipeId) {
       url: `/api/recipes/${recipeId}/media/${item.id}`,
     })),
     comments,
+    reviews: reviews.map((review) => ({
+      userId: review.userId,
+      author: review.author,
+      rating: Number(review.rating),
+      comment: review.comment,
+      createdAt: review.createdAt,
+    })),
+    userReview: viewerReview
+      ? { rating: Number(viewerReview.rating), comment: viewerReview.comment }
+      : null,
     averageRating: recipe.average_rating === null ? null : Number(recipe.average_rating),
     ratingCount: Number(recipe.rating_count),
   };
+}
+
+function addHiddenIngredientExclusions(conditions, values, hiddenIngredients) {
+  for (const { ingredient } of hiddenIngredients) {
+    conditions.push(`NOT EXISTS (
+      SELECT 1 FROM recipe_ingredients ri
+      WHERE ri.recipe_id = r.id AND LOCATE(LOWER(?), LOWER(ri.name)) > 0
+    )`);
+    values.push(ingredient);
+  }
 }
 
 app.get('/api/recipes', optionalAuth, async (request, response, next) => {
   try {
     const conditions = [];
     const values = [];
+    if (request.query.excludeHidden === 'true' && request.authUserId) {
+      const [hiddenIngredients] = await pool.execute(
+        'SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ? ORDER BY ingredient',
+        [request.authUserId],
+      );
+      addHiddenIngredientExclusions(conditions, values, hiddenIngredients);
+    }
     const search = typeof request.query.q === 'string' ? request.query.q.trim() : '';
     const tagQuery = typeof request.query.tagQuery === 'string' ? request.query.tagQuery.trim() : '';
     const difficulty = typeof request.query.difficulty === 'string' ? request.query.difficulty : '';
+    const diet = typeof request.query.diet === 'string' ? request.query.diet.trim() : '';
     const maxTime = Number(request.query.maxTime);
     const tags = (Array.isArray(request.query.tag) ? request.query.tag : [request.query.tag])
       .filter((tag) => typeof tag === 'string' && tag.trim()).map((tag) => tag.trim());
-    const hiddenIngredients = request.authUserId
-      ? (await pool.execute(
-        'SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ?',
-        [request.authUserId],
-      ))[0].map((item) => item.ingredient)
-        .filter((ingredient) => !search.toLocaleLowerCase().includes(ingredient.toLocaleLowerCase()))
-      : [];
     if (search) {
       conditions.push(`(r.title LIKE ? OR r.description LIKE ? OR EXISTS (
         SELECT 1 FROM recipe_ingredients ri WHERE ri.recipe_id = r.id AND ri.name LIKE ?
@@ -428,12 +456,9 @@ app.get('/api/recipes', optionalAuth, async (request, response, next) => {
       conditions.push('EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag LIKE ?)');
       values.push(`%${tagQuery}%`);
     }
-    for (const ingredient of hiddenIngredients) {
-      conditions.push(`NOT EXISTS (
-        SELECT 1 FROM recipe_ingredients ri
-        WHERE ri.recipe_id = r.id AND ri.name LIKE ?
-      )`);
-      values.push(`%${ingredient}%`);
+    if (diet) {
+      conditions.push('EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND LOWER(rt.tag) = LOWER(?))');
+      values.push(diet);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const [recipes] = await pool.execute(
@@ -495,9 +520,11 @@ app.post('/api/recipes/:id/comments', requireAuth, async (request, response, nex
 
 app.put('/api/recipes/:id/rating', requireAuth, async (request, response, next) => {
   const rating = Number(request.body?.rating);
+  const comment = typeof request.body?.comment === 'string' ? request.body.comment.trim() : '';
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return response.status(400).json({ error: 'A avaliação deve ser de 1 a 5.' });
   }
+  if (comment.length > 1000) return response.status(400).json({ error: 'O comentário da avaliação deve ter até 1000 caracteres.' });
   try {
     const [recipes] = await pool.execute('SELECT user_id FROM recipes WHERE id = ?', [request.params.id]);
     if (!recipes.length) return response.status(404).json({ error: 'Receita não encontrada.' });
@@ -505,15 +532,26 @@ app.put('/api/recipes/:id/rating', requireAuth, async (request, response, next) 
       return response.status(403).json({ error: 'Você não pode avaliar uma receita criada por você.' });
     }
     await pool.execute(
-      `INSERT INTO recipe_ratings (recipe_id, user_id, rating) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE rating = VALUES(rating), updated_at = CURRENT_TIMESTAMP`,
-      [request.params.id, request.authUserId, rating],
+      `INSERT INTO recipe_ratings (recipe_id, user_id, rating, review_comment) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE rating = VALUES(rating), review_comment = VALUES(review_comment), updated_at = CURRENT_TIMESTAMP`,
+      [request.params.id, request.authUserId, rating, comment],
     );
-    const recipe = await getRecipeDetails(request.params.id);
+    const recipe = await getRecipeDetails(request.params.id, request.authUserId);
     if (!recipe) return response.status(404).json({ error: 'Receita não encontrada.' });
-    return response.json({ averageRating: recipe.averageRating, ratingCount: recipe.ratingCount });
+    return response.json({ averageRating: recipe.averageRating, ratingCount: recipe.ratingCount, userReview: recipe.userReview, reviews: recipe.reviews });
   } catch (error) {
     if (error.code === 'ER_NO_REFERENCED_ROW_2') return response.status(404).json({ error: 'Receita não encontrada.' });
+    return next(error);
+  }
+});
+
+app.delete('/api/recipes/:id/rating', requireAuth, async (request, response, next) => {
+  try {
+    await pool.execute('DELETE FROM recipe_ratings WHERE recipe_id = ? AND user_id = ?', [request.params.id, request.authUserId]);
+    const recipe = await getRecipeDetails(request.params.id, request.authUserId);
+    if (!recipe) return response.status(404).json({ error: 'Receita não encontrada.' });
+    return response.json({ averageRating: recipe.averageRating, ratingCount: recipe.ratingCount, userReview: null, reviews: recipe.reviews });
+  } catch (error) {
     return next(error);
   }
 });
@@ -548,7 +586,7 @@ app.post('/api/recipes/:id/reports', requireAuth, async (request, response, next
 
 app.get('/api/me/state', requireAuth, async (request, response, next) => {
   try {
-    const [[saved], [lists], [listItems], [shoppingItems], [hiddenIngredients]] = await Promise.all([
+    const [[saved], [lists], [listItems], [shoppingItems], [hiddenIngredients], [preferredTags]] = await Promise.all([
       pool.execute('SELECT recipe_id FROM saved_recipes WHERE user_id = ?', [request.authUserId]),
       pool.execute('SELECT id, name FROM recipe_lists WHERE user_id = ? ORDER BY created_at', [request.authUserId]),
       pool.execute(
@@ -558,6 +596,7 @@ app.get('/api/me/state', requireAuth, async (request, response, next) => {
       ),
       pool.execute('SELECT id, name, completed FROM shopping_list_items WHERE user_id = ? ORDER BY created_at', [request.authUserId]),
       pool.execute('SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ? ORDER BY ingredient', [request.authUserId]),
+      pool.execute('SELECT tag FROM user_preferred_tags WHERE user_id = ? ORDER BY tag', [request.authUserId]),
     ]);
     return response.json({
       savedRecipeIds: saved.map((item) => item.recipe_id),
@@ -568,6 +607,158 @@ app.get('/api/me/state', requireAuth, async (request, response, next) => {
       })),
       shoppingItems: shoppingItems.map((item) => ({ ...item, completed: Boolean(item.completed) })),
       hiddenIngredients: hiddenIngredients.map((item) => item.ingredient),
+      preferredTags: preferredTags.map((item) => item.tag),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/me/preferred-tags', requireAuth, async (request, response, next) => {
+  const tags = request.body?.tags;
+  if (!Array.isArray(tags) || tags.length > 20 ||
+    tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 40)) {
+    return response.status(400).json({ error: 'Informe até 20 preferências válidas, com no máximo 40 caracteres cada.' });
+  }
+  const normalizedTags = [...new Map(tags.map((tag) => [tag.trim().toLocaleLowerCase(), tag.trim()])).values()];
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute('DELETE FROM user_preferred_tags WHERE user_id = ?', [request.authUserId]);
+    for (const tag of normalizedTags) {
+      await connection.execute('INSERT INTO user_preferred_tags (user_id, tag) VALUES (?, ?)', [request.authUserId, tag]);
+    }
+    await connection.commit();
+    return response.json({ tags: normalizedTags });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+app.get('/api/recipes/recommendations', requireAuth, async (request, response, next) => {
+  try {
+    const [[preferredTags], [hiddenIngredients]] = await Promise.all([
+      pool.execute('SELECT tag FROM user_preferred_tags WHERE user_id = ? ORDER BY tag', [request.authUserId]),
+      pool.execute('SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ? ORDER BY ingredient', [request.authUserId]),
+    ]);
+    const tags = preferredTags.map((item) => item.tag);
+    if (!tags.length) return response.json({ recipes: [] });
+
+    const conditions = [
+      `EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag IN (${tags.map(() => '?').join(', ')}))`,
+    ];
+    const values = [...tags];
+    addHiddenIngredientExclusions(conditions, values, hiddenIngredients);
+    values.push(...tags);
+    const [recipes] = await pool.execute(
+      `SELECT r.id, r.title, r.description, r.prep_time_minutes, r.servings, r.difficulty,
+         u.name AS author,
+         (SELECT id FROM recipe_media WHERE recipe_id = r.id AND media_type = 'image' ORDER BY created_at DESC LIMIT 1) AS image_media_id,
+         (SELECT ROUND(AVG(rating), 1) FROM recipe_ratings WHERE recipe_id = r.id) AS average_rating,
+         (SELECT COUNT(*) FROM recipe_ratings WHERE recipe_id = r.id) AS rating_count
+       FROM recipes r JOIN users u ON u.id = r.user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY (SELECT COUNT(*) FROM recipe_tags matched
+         WHERE matched.recipe_id = r.id AND matched.tag IN (${tags.map(() => '?').join(', ')})) DESC,
+         r.created_at DESC LIMIT 30`,
+      values,
+    );
+    const results = await Promise.all(recipes.map(async (recipe) => {
+      const [[recipeTags], [ingredients]] = await Promise.all([
+        pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipe.id]),
+        pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipe.id]),
+      ]);
+      const preferredTagNames = new Set(tags.map((tag) => tag.toLocaleLowerCase()));
+      const matchedTags = recipeTags.map((item) => item.tag)
+        .filter((tag) => preferredTagNames.has(tag.toLocaleLowerCase()));
+      return {
+        id: recipe.id,
+        title: recipe.title,
+        description: recipe.description,
+        prepTimeMinutes: recipe.prep_time_minutes,
+        servings: recipe.servings,
+        difficulty: recipe.difficulty,
+        author: recipe.author,
+        imageUrl: recipe.image_media_id ? `/api/recipes/${recipe.id}/media/${recipe.image_media_id}` : null,
+        ingredients,
+        tags: recipeTags.map((item) => item.tag),
+        averageRating: recipe.average_rating === null ? null : Number(recipe.average_rating),
+        ratingCount: Number(recipe.rating_count),
+        reason: `Combina com sua preferência: ${matchedTags.join(', ')}.`,
+      };
+    }));
+    return response.json({ recipes: results });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+const substitutionCatalog = [
+  {
+    matches: ['leite', 'milk'],
+    alternatives: [
+      { name: 'Leite de soja sem açúcar', ratio: '1:1', reason: 'Mantém a umidade e funciona bem em preparações doces ou salgadas.', vegan: true },
+      { name: 'Leite de aveia sem açúcar', ratio: '1:1', reason: 'Boa opção para vitaminas, molhos e massas; pode deixar a receita levemente mais doce.', vegan: true },
+    ],
+  },
+  {
+    matches: ['ovo', 'ovos'],
+    alternatives: [
+      { name: 'Linhaça moída hidratada', ratio: '1 colher de sopa + 3 colheres de sopa de água por ovo', reason: 'Misture e deixe descansar por 10 minutos; indicada para dar liga em massas.', vegan: true },
+      { name: 'Purê de banana', ratio: '1/2 banana madura por ovo', reason: 'Funciona em bolos e panquecas doces; altera o sabor e não substitui o ovo em todas as receitas.', vegan: true },
+    ],
+  },
+  {
+    matches: ['farinha de trigo', 'trigo'],
+    alternatives: [
+      { name: 'Farinha de arroz', ratio: '1:1 por peso', reason: 'Não contém glúten, mas a textura pode ficar mais quebradiça; use apenas se a receita tolerar essa mudança.', vegan: true },
+      { name: 'Farinha de aveia certificada sem glúten', ratio: '1:1 por peso', reason: 'Adequada para massas mais úmidas; confirme a certificação para evitar contaminação cruzada.', vegan: true },
+    ],
+  },
+  {
+    matches: ['manteiga'],
+    alternatives: [
+      { name: 'Margarina vegetal', ratio: '1:1', reason: 'Substituição próxima para refogados e muitas massas; confira o rótulo para alergênicos.', vegan: true },
+      { name: 'Óleo vegetal neutro', ratio: '3/4 da quantidade de manteiga', reason: 'Funciona melhor em bolos e refogados; não reproduz a textura da manteiga em cremes.', vegan: true },
+    ],
+  },
+  {
+    matches: ['creme de leite'],
+    alternatives: [
+      { name: 'Creme culinário de soja', ratio: '1:1', reason: 'Boa opção para molhos e preparações salgadas; confira o rótulo para alergênicos.', vegan: true },
+      { name: 'Leite de coco', ratio: '1:1', reason: 'Funciona em molhos e curries, mas acrescenta sabor de coco.', vegan: true },
+    ],
+  },
+];
+
+app.get('/api/recipes/:id/substitutions', optionalAuth, async (request, response, next) => {
+  const ingredient = typeof request.query.ingredient === 'string' ? request.query.ingredient.trim() : '';
+  if (!ingredient || ingredient.length > 160) return response.status(400).json({ error: 'Selecione um ingrediente válido.' });
+  try {
+    const [recipes] = await pool.execute('SELECT id FROM recipes WHERE id = ?', [request.params.id]);
+    if (!recipes.length) return response.status(404).json({ error: 'Receita não encontrada.' });
+    const [ingredients] = await pool.execute(
+      'SELECT name FROM recipe_ingredients WHERE recipe_id = ? AND LOWER(name) = LOWER(?)',
+      [request.params.id, ingredient],
+    );
+    if (!ingredients.length) return response.status(404).json({ error: 'O ingrediente não pertence a esta receita.' });
+    const [tags] = await pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ?', [request.params.id]);
+    const recipeTags = tags.map((tag) => tag.tag.toLocaleLowerCase());
+    const isVegan = recipeTags.includes('vegano') || recipeTags.includes('vegan');
+    const normalizedIngredient = ingredient.toLocaleLowerCase();
+    const entry = substitutionCatalog.find((item) =>
+      item.matches.some((match) => normalizedIngredient.includes(match)) &&
+      !(item.matches.includes('leite') && normalizedIngredient.includes('creme de leite')));
+    const alternatives = (entry?.alternatives ?? [])
+      .filter((alternative) => !isVegan || alternative.vegan)
+      .map(({ vegan, ...alternative }) => alternative);
+    return response.json({
+      ingredient,
+      alternatives,
+      message: alternatives.length ? undefined : 'Ainda não temos uma substituição adequada cadastrada para este ingrediente.',
     });
   } catch (error) {
     return next(error);
@@ -764,9 +955,9 @@ app.get('/api/recipes/mine', requireAuth, async (request, response, next) => {
   }
 });
 
-app.get('/api/recipes/:id', async (request, response, next) => {
+app.get('/api/recipes/:id', optionalAuth, async (request, response, next) => {
   try {
-    const recipe = await getRecipeDetails(request.params.id);
+    const recipe = await getRecipeDetails(request.params.id, request.authUserId);
     if (!recipe) return response.status(404).json({ error: 'Receita não encontrada.' });
     return response.json({ recipe });
   } catch (error) {
@@ -1034,12 +1225,20 @@ await pool.query(`CREATE TABLE IF NOT EXISTS recipe_ratings (
   recipe_id CHAR(36) NOT NULL,
   user_id CHAR(36) NOT NULL,
   rating TINYINT UNSIGNED NOT NULL,
+  review_comment VARCHAR(1000) NOT NULL DEFAULT '',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (recipe_id, user_id),
   CONSTRAINT fk_recipe_ratings_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
   CONSTRAINT fk_recipe_ratings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )`);
+const [recipeRatingColumns] = await pool.query(
+  `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recipe_ratings' AND COLUMN_NAME = 'review_comment'`,
+);
+if (!recipeRatingColumns.length) {
+  await pool.query("ALTER TABLE recipe_ratings ADD COLUMN review_comment VARCHAR(1000) NOT NULL DEFAULT '' AFTER rating");
+}
 await pool.query(`CREATE TABLE IF NOT EXISTS saved_recipes (
   user_id CHAR(36) NOT NULL,
   recipe_id CHAR(36) NOT NULL,
@@ -1078,6 +1277,12 @@ await pool.query(`CREATE TABLE IF NOT EXISTS user_hidden_ingredients (
   ingredient VARCHAR(160) NOT NULL,
   PRIMARY KEY (user_id, ingredient),
   CONSTRAINT fk_user_hidden_ingredients_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+await pool.query(`CREATE TABLE IF NOT EXISTS user_preferred_tags (
+  user_id CHAR(36) NOT NULL,
+  tag VARCHAR(40) NOT NULL,
+  PRIMARY KEY (user_id, tag),
+  CONSTRAINT fk_user_preferred_tags_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )`);
 
 app.listen(port, () => console.log(`Sabores da Terra API listening on port ${port}`));
