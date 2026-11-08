@@ -351,6 +351,7 @@ export async function searchRecipes(filters: {
   diet?: string;
   tags?: string[];
   tagQuery?: string;
+  excludeHidden?: boolean;
 }) {
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set('q', filters.query.trim());
@@ -359,6 +360,7 @@ export async function searchRecipes(filters: {
   if (filters.diet) params.set('diet', filters.diet);
   filters.tags?.forEach((tag) => params.append('tag', tag));
   if (filters.tagQuery?.trim()) params.set('tagQuery', filters.tagQuery.trim());
+  if (filters.excludeHidden) params.set('excludeHidden', 'true');
   const query = params.toString();
   let response: Response;
   try {

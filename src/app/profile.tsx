@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
@@ -97,25 +98,34 @@ export default function ProfileScreen() {
     <View style={styles.screen}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.profileHeader}>
+          <Animated.View entering={FadeInDown.duration(400).delay(40)} style={styles.profileHeader}>
             <View style={styles.avatar}><Text style={styles.avatarText}>{displayName.trim().charAt(0).toUpperCase() || '?'}</Text></View>
             <View>
+              <Text style={styles.eyebrow}>MEU PERFIL</Text>
               <Text style={styles.name}>{displayName}</Text>
               <Text style={styles.email}>{user?.email ?? ''}</Text>
             </View>
             {authError ? <Text accessibilityRole="alert" style={styles.errorText}>{authError}</Text> : null}
-          </View>
-          {menuItems.map((item) => (
-            <Pressable key={item.label} style={styles.menuItem} onPress={() => router.push(item.path)}>
-              <Text style={styles.menuText}>{item.label}</Text>
+          </Animated.View>
+          {menuItems.map((item, index) => (
+            <Animated.View key={item.label} entering={FadeInDown.duration(360).delay(100 + index * 55)}>
+              <Pressable
+                style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+                onPress={() => router.push(item.path)}>
+                <Text style={styles.menuText}>{item.label}</Text>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+            </Animated.View>
+          ))}
+          <Animated.View entering={FadeInDown.duration(360).delay(265)}>
+            <Pressable
+              style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+              onPress={() => router.push('/settings')}>
+              <Text style={styles.menuText}>Configurações</Text>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
-          ))}
-          <Pressable style={styles.menuItem} onPress={() => router.push('/settings')}>
-            <Text style={styles.menuText}>Configurações</Text>
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-          <View style={styles.restrictionsCard}>
+          </Animated.View>
+          <Animated.View entering={FadeInDown.duration(400).delay(320)} style={styles.restrictionsCard}>
             <Text style={styles.restrictionsTitle}>Preferências alimentares</Text>
             <Text style={styles.restrictionsDescription}>Escolha os tipos de receita que devem aparecer nas recomendações. A busca continua mostrando todas as receitas.</Text>
             <View style={styles.preferenceChoices}>
@@ -138,10 +148,10 @@ export default function ProfileScreen() {
             {savingPreferences ? <Text style={styles.restrictionsDescription}>Salvando preferências...</Text> : null}
             {preferenceError ? <Text accessibilityRole="alert" style={styles.errorText}>{preferenceError}</Text> : null}
             {notificationError ? <Text accessibilityRole="alert" style={styles.errorText}>{notificationError}</Text> : null}
-          </View>
-          <View style={styles.restrictionsCard}>
+          </Animated.View>
+          <Animated.View entering={FadeInDown.duration(400).delay(380)} style={styles.restrictionsCard}>
             <Text style={styles.restrictionsTitle}>Restrições alimentares</Text>
-            <Text style={styles.restrictionsDescription}>Receitas que contenham estes ingredientes serão excluídas das recomendações. A busca continuará mostrando os resultados; confira sempre os ingredientes e rótulos, pois isso não garante segurança contra alergênicos.</Text>
+            <Text style={styles.restrictionsDescription}>Receitas com estes ingredientes serão ocultadas no início e nas recomendações. A busca continua mostrando todos os resultados; confira sempre os ingredientes e rótulos, pois isso não garante segurança contra alergênicos.</Text>
             {!user ? <Text style={styles.restrictionsDescription}>Entre na sua conta para salvar suas restrições.</Text> : null}
             {personalDataLoading ? <Text style={styles.restrictionsDescription}>Carregando preferências...</Text> : null}
             {personalDataError ? <Text accessibilityRole="alert" style={styles.errorText}>{personalDataError}</Text> : null}
@@ -178,10 +188,12 @@ export default function ProfileScreen() {
               </View>
             ))}
             {restrictionError ? <Text accessibilityRole="alert" style={styles.errorText}>{restrictionError}</Text> : null}
-          </View>
-          <Pressable style={styles.logout} onPress={handleSignOut}>
-            <Text style={styles.logoutText}>Sair</Text>
-          </Pressable>
+          </Animated.View>
+          <Animated.View entering={FadeInDown.duration(360).delay(440)}>
+            <Pressable style={({ pressed }) => [styles.logout, pressed && styles.pressed]} onPress={handleSignOut}>
+              <Text style={styles.logoutText}>Sair</Text>
+            </Pressable>
+          </Animated.View>
         </ScrollView>
       </SafeAreaView>
       <AppBottomNav />

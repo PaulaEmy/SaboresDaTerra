@@ -26,9 +26,11 @@ export function AppBottomNav() {
         return (
           <Pressable
             key={item.path}
+            accessibilityRole="button"
             accessibilityLabel={item.label}
+            accessibilityState={{ selected: isActive }}
             onPress={() => router.push(item.path)}
-            style={appStyles.navItem}>
+            style={[appStyles.navItem, isActive && appStyles.navItemActive]}>
             <Text style={[appStyles.navIcon, isActive && appStyles.navIconActive]}>{item.icon}</Text>
             <Text style={[appStyles.navLabel, isActive && appStyles.navLabelActive]}>{item.label}</Text>
           </Pressable>

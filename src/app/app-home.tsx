@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollViewInstance } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
@@ -11,13 +12,14 @@ import { appStyles } from '@/styles/app.styles';
 
 export default function AppHomeScreen() {
   const { user, hiddenIngredients, preferredTags, personalDataError, personalDataLoading } = useAppState();
+  const { width } = useWindowDimensions();
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [recommendedRecipes, setRecommendedRecipes] = useState<RecommendedRecipe[]>([]);
   const [recommendedForUser, setRecommendedForUser] = useState<string | null>(null);
   const [recommendationError, setRecommendationError] = useState('');
   const [notificationSyncError, setNotificationSyncError] = useState('');
   const [loadError, setLoadError] = useState('');
-  const allRecipesList = useRef<ScrollView>(null);
+  const allRecipesList = useRef<ScrollViewInstance>(null);
   const [allRecipesListWidth, setAllRecipesListWidth] = useState(0);
   const [allRecipesContentWidth, setAllRecipesContentWidth] = useState(0);
   const [allRecipesOffset, setAllRecipesOffset] = useState(0);
@@ -25,11 +27,11 @@ export default function AppHomeScreen() {
   useEffect(() => {
     if (personalDataLoading || personalDataError) return;
     let active = true;
-    searchRecipes({})
+    searchRecipes({ excludeHidden: true })
       .then((items) => { if (active) setRecipes(items); })
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Não foi possível carregar receitas.'); });
     return () => { active = false; };
-  }, [personalDataError, personalDataLoading]);
+  }, [hiddenIngredients, personalDataError, personalDataLoading]);
 
   useEffect(() => {
     if (!user || personalDataLoading || personalDataError) return;
@@ -82,25 +84,44 @@ export default function AppHomeScreen() {
         <ScrollView
           contentContainerStyle={appStyles.scrollContent}
           showsVerticalScrollIndicator={false}>
-          <Pressable style={appStyles.profileButton} onPress={() => router.push('/profile')}>
+          <Animated.View entering={FadeInDown.duration(420).delay(40)} style={appStyles.hero}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Abrir perfil"
+              style={appStyles.profileButton}
+              onPress={() => router.push('/profile')}>
               <Text style={appStyles.avatarText}>{user?.name.trim().charAt(0).toUpperCase() ?? '?'}</Text>
-          </Pressable>
-          <Text style={appStyles.greeting}>Bem-vindo(a),</Text>
-          <Text style={appStyles.userName}>{user?.name ?? 'Visitante'}</Text>
+            </Pressable>
+            <Text style={appStyles.brandLabel}>SABORES DA TERRA</Text>
+            <Text style={appStyles.greeting}>Bem-vindo(a),</Text>
+            <Text style={appStyles.userName}>{user?.name ?? 'Visitante'}</Text>
+            <Text style={appStyles.heroSubtitle}>Inspiração gostosa para o seu dia.</Text>
+          </Animated.View>
 
-          <Pressable style={appStyles.searchBar} onPress={() => router.push('/search')}>
-            <Text style={appStyles.searchIcon}>⌕</Text>
-            <Text style={appStyles.searchPlaceholder}>Pesquisar receitas...</Text>
-          </Pressable>
+          <Animated.View entering={FadeInDown.duration(420).delay(100)}>
+            <Pressable style={appStyles.searchBar} onPress={() => router.push('/search')}>
+              <Text style={appStyles.searchIcon}>⌕</Text>
+              <Text style={appStyles.searchPlaceholder}>Pesquisar receitas...</Text>
+              <Text style={appStyles.searchArrow}>›</Text>
+            </Pressable>
+          </Animated.View>
 
-          <Pressable style={appStyles.shoppingButton} onPress={() => router.push('/shopping-list')}>
-            <Text style={appStyles.shoppingIcon}>♧</Text>
-            <Text style={appStyles.shoppingLabel}>MINHA LISTA DE COMPRAS</Text>
-          </Pressable>
+          <Animated.View entering={FadeInDown.duration(420).delay(160)}>
+            <Pressable style={appStyles.shoppingButton} onPress={() => router.push('/shopping-list')}>
+              <View style={appStyles.shoppingIconWrap}>
+                <Text style={appStyles.shoppingIcon}>♧</Text>
+              </View>
+              <View style={appStyles.shoppingCopy}>
+                <Text style={appStyles.shoppingLabel}>Lista de compras</Text>
+                <Text style={appStyles.shoppingCaption}>Organize seus ingredientes</Text>
+              </View>
+              <Text style={appStyles.shoppingArrow}>›</Text>
+            </Pressable>
+          </Animated.View>
 
-          <View style={appStyles.sectionHeader}>
+          <Animated.View entering={FadeInDown.duration(420).delay(220)} style={appStyles.sectionHeader}>
             <Text style={appStyles.sectionTitle}>Recomendadas para você</Text>
-          </View>
+          </Animated.View>
           {!user ? <Text style={appStyles.emptyState}>Entre na sua conta para receber recomendações personalizadas.</Text> : null}
           {user && preferredTags.length === 0 ? <Text style={appStyles.emptyState}>Escolha suas preferências no perfil para personalizar as recomendações.</Text> : null}
           {recommendationError ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{recommendationError}</Text> : null}
@@ -111,9 +132,9 @@ export default function AppHomeScreen() {
           {hasCurrentRecommendations && recommendedRecipes.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={appStyles.horizontalList}>
               {recommendedRecipes.map((recipe) => (
+                <Animated.View key={recipe.id} entering={FadeInDown.duration(360).delay(50)}>
                 <Pressable
-                  key={recipe.id}
-                  style={appStyles.smallCard}
+                  style={({ pressed }) => [appStyles.smallCard, pressed && appStyles.cardPressed]}
                   onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                   <View style={appStyles.smallImage}>
                     {recipe.imageUrl
@@ -123,38 +144,49 @@ export default function AppHomeScreen() {
                   <Text style={appStyles.smallTitle}>{recipe.title}</Text>
                   <Text style={appStyles.featureMeta}>{recipe.reason}</Text>
                 </Pressable>
+                </Animated.View>
               ))}
             </ScrollView>
           ) : null}
 
-          <View style={appStyles.sectionHeader}>
+          <Animated.View entering={FadeInDown.duration(420).delay(280)} style={appStyles.sectionHeader}>
             <Text style={appStyles.sectionTitle}>Receitas da Estação</Text>
             <Pressable onPress={() => router.push('/search')}>
               <Text style={appStyles.seeAll}>VER TODAS</Text>
             </Pressable>
-          </View>
+          </Animated.View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={appStyles.horizontalList}>
             {seasonalRecipes.map((recipe) => (
+              <Animated.View key={recipe.id} entering={FadeInDown.duration(400).delay(60)}>
               <Pressable
-                key={recipe.id}
-                style={appStyles.featureCard}
+                style={({ pressed }) => [
+                  appStyles.featureCard,
+                  { width: Math.min(width - 48, 410) },
+                  pressed && appStyles.cardPressed,
+                ]}
                 onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                 <View style={appStyles.featureImage}>
                   {recipe.imageUrl
                     ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.featurePhoto} resizeMode="cover" />
                     : <Text style={appStyles.imageIcon}>♨</Text>}
+                  <View style={appStyles.seasonBadge}>
+                    <Text style={appStyles.seasonText}>DA ESTAÇÃO</Text>
+                  </View>
+                  <View style={appStyles.featureOverlay}>
+                    <Text style={appStyles.featureTitle}>{recipe.title}</Text>
+                    <Text style={appStyles.featureOverlayMeta}>{recipe.prepTimeMinutes} min • Dificuldade {recipe.difficulty}</Text>
+                  </View>
                 </View>
-                <Text style={appStyles.featureTitle}>{recipe.title}</Text>
-                <Text style={appStyles.featureMeta}>{recipe.prepTimeMinutes} min • Dificuldade {recipe.difficulty}</Text>
               </Pressable>
+              </Animated.View>
             ))}
           </ScrollView>
           {personalDataError || loadError ? <Text style={appStyles.emptyState}>{personalDataError || loadError}</Text> : null}
           {!personalDataError && !loadError && visibleRecipes.length === 0 ? <Text style={appStyles.emptyState}>Ainda não há receitas publicadas.</Text> : null}
 
           {visibleRecipes.length > 0 ? <>
-            <View style={appStyles.sectionHeader}>
+            <Animated.View entering={FadeInDown.duration(420).delay(340)} style={appStyles.sectionHeader}>
               <Text style={appStyles.sectionTitle}>Todas as receitas</Text>
               <View style={appStyles.carouselActions}>
                 <Pressable
@@ -174,7 +206,7 @@ export default function AppHomeScreen() {
                   <Text style={appStyles.carouselArrowText}>›</Text>
                 </Pressable>
               </View>
-            </View>
+            </Animated.View>
 
           <ScrollView
             ref={allRecipesList}
@@ -186,9 +218,9 @@ export default function AppHomeScreen() {
             onScroll={updateAllRecipesOffset}
             scrollEventThrottle={16}>
             {visibleRecipes.map((recipe) => (
+              <Animated.View key={recipe.id} entering={FadeInDown.duration(360).delay(50)}>
               <Pressable
-                key={recipe.id}
-                style={appStyles.smallCard}
+                style={({ pressed }) => [appStyles.smallCard, pressed && appStyles.cardPressed]}
                 onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                 <View style={appStyles.smallImage}>
                   {recipe.imageUrl
@@ -200,6 +232,7 @@ export default function AppHomeScreen() {
                   <Text style={appStyles.star}>★ </Text>{recipe.averageRating?.toFixed(1) ?? 'Sem avaliações'}
                 </Text>
               </Pressable>
+              </Animated.View>
             ))}
           </ScrollView>
           </> : null}

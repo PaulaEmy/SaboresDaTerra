@@ -405,10 +405,27 @@ async function getRecipeDetails(recipeId, viewerId = null) {
   };
 }
 
+function addHiddenIngredientExclusions(conditions, values, hiddenIngredients) {
+  for (const { ingredient } of hiddenIngredients) {
+    conditions.push(`NOT EXISTS (
+      SELECT 1 FROM recipe_ingredients ri
+      WHERE ri.recipe_id = r.id AND LOCATE(LOWER(?), LOWER(ri.name)) > 0
+    )`);
+    values.push(ingredient);
+  }
+}
+
 app.get('/api/recipes', optionalAuth, async (request, response, next) => {
   try {
     const conditions = [];
     const values = [];
+    if (request.query.excludeHidden === 'true' && request.authUserId) {
+      const [hiddenIngredients] = await pool.execute(
+        'SELECT ingredient FROM user_hidden_ingredients WHERE user_id = ? ORDER BY ingredient',
+        [request.authUserId],
+      );
+      addHiddenIngredientExclusions(conditions, values, hiddenIngredients);
+    }
     const search = typeof request.query.q === 'string' ? request.query.q.trim() : '';
     const tagQuery = typeof request.query.tagQuery === 'string' ? request.query.tagQuery.trim() : '';
     const difficulty = typeof request.query.difficulty === 'string' ? request.query.difficulty : '';
@@ -634,13 +651,7 @@ app.get('/api/recipes/recommendations', requireAuth, async (request, response, n
       `EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag IN (${tags.map(() => '?').join(', ')}))`,
     ];
     const values = [...tags];
-    for (const { ingredient } of hiddenIngredients) {
-      conditions.push(`NOT EXISTS (
-        SELECT 1 FROM recipe_ingredients ri
-        WHERE ri.recipe_id = r.id AND ri.name LIKE ?
-      )`);
-      values.push(`%${ingredient}%`);
-    }
+    addHiddenIngredientExclusions(conditions, values, hiddenIngredients);
     values.push(...tags);
     const [recipes] = await pool.execute(
       `SELECT r.id, r.title, r.description, r.prep_time_minutes, r.servings, r.difficulty,

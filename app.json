@@ -56,7 +56,8 @@
           "photosPermission": "Permita que o Sabores da Terra acesse seus vídeos."
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
