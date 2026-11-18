@@ -1,19 +1,21 @@
 import { router, usePathname } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
+import { AppIcon } from '@/components/app-icon';
+import { Colors } from '@/constants/theme';
 import { appStyles } from '@/styles/app.styles';
 
 type NavItem = {
   label: string;
-  icon: string;
+  icon: 'home' | 'search' | 'bookmark' | 'user';
   path: '/app-home' | '/search' | '/favorites' | '/profile';
 };
 
 const navItems: NavItem[] = [
-  { label: 'Início', icon: '⌂', path: '/app-home' },
-  { label: 'Busca', icon: '⌕', path: '/search' },
-  { label: 'Favoritos', icon: '♡', path: '/favorites' },
-  { label: 'Perfil', icon: '♙', path: '/profile' },
+  { label: 'Início', icon: 'home', path: '/app-home' },
+  { label: 'Busca', icon: 'search', path: '/search' },
+  { label: 'Favoritos', icon: 'bookmark', path: '/favorites' },
+  { label: 'Perfil', icon: 'user', path: '/profile' },
 ];
 
 export function AppBottomNav() {
@@ -31,7 +33,7 @@ export function AppBottomNav() {
             accessibilityState={{ selected: isActive }}
             onPress={() => router.push(item.path)}
             style={[appStyles.navItem, isActive && appStyles.navItemActive]}>
-            <Text style={[appStyles.navIcon, isActive && appStyles.navIconActive]}>{item.icon}</Text>
+            <AppIcon name={item.icon} size={21} color={isActive ? Colors.brandGreen : '#7F7A71'} strokeWidth={isActive ? 2.4 : 1.9} />
             <Text style={[appStyles.navLabel, isActive && appStyles.navLabelActive]}>{item.label}</Text>
           </Pressable>
         );

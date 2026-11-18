@@ -8,11 +8,21 @@ import { login } from '@/services/auth-api';
 import { loginStyles } from '@/styles/login.styles';
 
 export default function LoginScreen() {
-  const { setAuthenticatedUser } = useAppState();
+  const { setAuthenticatedUser, signOut } = useAppState();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  async function continueAsVisitor() {
+    setError('');
+    try {
+      await signOut();
+      router.replace('/app-home');
+    } catch (signOutError) {
+      setError(signOutError instanceof Error ? signOutError.message : 'Não foi possível iniciar como visitante.');
+    }
+  }
 
   async function handleLogin() {
     if (submitting) return;
@@ -41,8 +51,8 @@ export default function LoginScreen() {
           <PrimaryButton label={submitting ? 'ENTRANDO...' : 'ENTRAR'} onPress={handleLogin} disabled={submitting} />
         </View>
         <InlineLink label="Criar uma conta" onPress={() => router.push('/signup')} />
+        <InlineLink label="Continuar como visitante" onPress={() => void continueAsVisitor()} />
       </View>
     </AuthScreen>
   );
 }
-

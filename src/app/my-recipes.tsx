@@ -5,10 +5,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { AuthHeader, PrimaryButton } from '@/components/auth-ui';
+import { useAppState } from '@/components/app-state';
 import { deleteRecipe, listMyRecipes, type UserRecipe } from '@/services/auth-api';
 import { userRecipesStyles as styles } from '@/styles/user-recipes.styles';
 
 export default function MyRecipesScreen() {
+  const { user, authLoading } = useAppState();
   const [recipes, setRecipes] = useState<UserRecipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -16,6 +18,11 @@ export default function MyRecipesScreen() {
   const [deleting, setDeleting] = useState(false);
 
   useFocusEffect(useCallback(() => {
+    if (!user || authLoading) {
+      setLoading(false);
+      setRecipes([]);
+      return;
+    }
     let active = true;
     setLoading(true);
     setError('');
@@ -32,7 +39,7 @@ export default function MyRecipesScreen() {
     return () => {
       active = false;
     };
-  }, []));
+  }, [authLoading, user]));
 
   async function confirmDeleteRecipe() {
     if (!recipePendingDeletion || deleting) return;
@@ -57,9 +64,10 @@ export default function MyRecipesScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Text style={styles.heading}>Receitas criadas por você</Text>
           <Text style={styles.description}>Suas receitas, ingredientes e etapas em um só lugar.</Text>
+          {!authLoading && !user ? <Text style={styles.description}>Entre ou crie uma conta para cadastrar e gerenciar receitas.</Text> : null}
           {loading ? <Text style={styles.emptyText}>Carregando receitas...</Text> : null}
           {error ? <Text accessibilityRole="alert" style={styles.message}>{error}</Text> : null}
-          {!loading && !error && recipes.length === 0 ? (
+          {user && !loading && !error && recipes.length === 0 ? (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>Você ainda não criou receitas.</Text>
             </View>
@@ -86,7 +94,7 @@ export default function MyRecipesScreen() {
               </View>
             </View>
           ))}
-          <PrimaryButton label="CRIAR NOVA RECEITA" onPress={() => router.push('/recipe-create')} />
+          {user ? <PrimaryButton label="CRIAR NOVA RECEITA" onPress={() => router.push('/recipe-create')} /> : !authLoading ? <PrimaryButton label="ENTRAR" onPress={() => router.replace('/login')} /> : null}
         </ScrollView>
       </SafeAreaView>
       <Modal visible={Boolean(recipePendingDeletion)} transparent animationType="fade" onRequestClose={() => setRecipePendingDeletion(null)}>

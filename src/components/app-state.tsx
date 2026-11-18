@@ -72,24 +72,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
   const [savedLists, setSavedLists] = useState<SavedRecipeList[]>([]);
   const previousOnline = useRef<boolean | null>(isOnline);
+  const authGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
+    const generation = authGeneration.current;
     getCurrentUser()
       .then((currentUser) => {
-        if (active) {
+        if (active && generation === authGeneration.current) {
           setUser(currentUser);
           setAuthError('');
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (active && generation === authGeneration.current) {
           setUser(null);
           setAuthError(error instanceof Error ? error.message : 'Não foi possível restaurar sua sessão.');
         }
       })
       .finally(() => {
-        if (active) setAuthLoading(false);
+        if (active && generation === authGeneration.current) setAuthLoading(false);
       });
     return () => {
       active = false;
@@ -231,25 +233,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         : list));
     },
     removeRecipeFromList: async (recipeId, listId) => {
+      if (!user) throw new Error('Entre na sua conta para alterar suas listas.');
       await removeRecipeFromListRequest(listId, recipeId);
       setSavedLists((current) => current.map((list) => list.id === listId
         ? { ...list, recipeIds: list.recipeIds.filter((id) => id !== recipeId) }
         : list));
     },
     setShoppingItemCompleted: async (itemId, completed) => {
+      if (!user) throw new Error('Entre na sua conta para alterar sua lista de compras.');
       await updateShoppingItemRequest(itemId, completed);
       setShoppingItems((current) => current.map((item) => item.id === itemId ? { ...item, completed } : item));
     },
     removeShoppingItem: async (itemId) => {
+      if (!user) throw new Error('Entre na sua conta para alterar sua lista de compras.');
       await deleteShoppingItemRequest(itemId);
       setShoppingItems((current) => current.filter((item) => item.id !== itemId));
     },
     setAuthenticatedUser: (authenticatedUser) => {
+      authGeneration.current += 1;
+      setAuthLoading(false);
       setAuthError('');
       setUser(authenticatedUser);
     },
     signOut: async () => {
+      authGeneration.current += 1;
       await clearAuthToken();
+      setAuthLoading(false);
       setUser(null);
       setSavedRecipeIds([]);
       setSavedLists([]);

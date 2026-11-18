@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 
@@ -80,6 +81,12 @@ export default function SettingsScreen() {
   return (
     <AuthScreen>
       <AuthHeader title="Configurações" />
+      {!user ? (
+        <View style={styles.settingsContent}>
+          <Text style={styles.settingsDescription}>Entre ou crie uma conta para acessar as configurações.</Text>
+          <PrimaryButton label="ENTRAR" onPress={() => router.replace('/login')} />
+        </View>
+      ) : (
       <View style={styles.settingsContent}>
         <Text style={styles.settingsTitle}>Segurança</Text>
         <Text style={styles.settingsDescription}>Altere a senha da sua conta.</Text>
@@ -102,6 +109,7 @@ export default function SettingsScreen() {
         </Pressable>
         {Platform.OS === 'web' ? <Text style={styles.settingsDescription}>Notificações estão disponíveis no aplicativo nativo para Android e iOS.</Text> : null}
       </View>
+      )}
     </AuthScreen>
   );
 }

@@ -1,11 +1,13 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollViewInstance } from 'react-native';
+import { Pressable, ScrollView, Text, View, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollViewInstance } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { useAppState } from '@/components/app-state';
+import { AppIcon } from '@/components/app-icon';
+import { RecipeImage } from '@/components/recipe-image';
 import { getRecipeMediaUrl, getRecommendations, searchRecipes, type RecipeSummary, type RecommendedRecipe } from '@/services/auth-api';
 import { cancelDailyRecipeSuggestions, hasDailyRecipeSuggestion, scheduleDailyRecipeSuggestion } from '@/services/recipe-notifications';
 import { appStyles } from '@/styles/app.styles';
@@ -90,7 +92,7 @@ export default function AppHomeScreen() {
               accessibilityLabel="Abrir perfil"
               style={appStyles.profileButton}
               onPress={() => router.push('/profile')}>
-              <Text style={appStyles.avatarText}>{user?.name.trim().charAt(0).toUpperCase() ?? '?'}</Text>
+              {user ? <Text style={appStyles.avatarText}>{user.name.trim().charAt(0).toUpperCase()}</Text> : <AppIcon name="user" size={23} color="#FCFAF5" />}
             </Pressable>
             <Text style={appStyles.brandLabel}>SABORES DA TERRA</Text>
             <Text style={appStyles.greeting}>Bem-vindo(a),</Text>
@@ -100,29 +102,40 @@ export default function AppHomeScreen() {
 
           <Animated.View entering={FadeInDown.duration(420).delay(100)}>
             <Pressable style={appStyles.searchBar} onPress={() => router.push('/search')}>
-              <Text style={appStyles.searchIcon}>⌕</Text>
+              <AppIcon name="search" size={21} color="#77736C" />
               <Text style={appStyles.searchPlaceholder}>Pesquisar receitas...</Text>
-              <Text style={appStyles.searchArrow}>›</Text>
+              <AppIcon name="chevron-right" size={20} color="#376044" />
             </Pressable>
           </Animated.View>
 
           <Animated.View entering={FadeInDown.duration(420).delay(160)}>
             <Pressable style={appStyles.shoppingButton} onPress={() => router.push('/shopping-list')}>
               <View style={appStyles.shoppingIconWrap}>
-                <Text style={appStyles.shoppingIcon}>♧</Text>
+                <AppIcon name="shopping-basket" size={21} color="#FCFAF5" />
               </View>
               <View style={appStyles.shoppingCopy}>
                 <Text style={appStyles.shoppingLabel}>Lista de compras</Text>
-                <Text style={appStyles.shoppingCaption}>Organize seus ingredientes</Text>
+                <Text style={appStyles.shoppingCaption}>{user ? 'Organize seus ingredientes' : 'Entre para montar sua lista'}</Text>
               </View>
-              <Text style={appStyles.shoppingArrow}>›</Text>
+              <AppIcon name="chevron-right" size={20} color="#376044" />
             </Pressable>
           </Animated.View>
 
           <Animated.View entering={FadeInDown.duration(420).delay(220)} style={appStyles.sectionHeader}>
-            <Text style={appStyles.sectionTitle}>Recomendadas para você</Text>
+            <Text style={appStyles.sectionTitle}>{user ? 'Recomendadas para você' : 'Inspiração para hoje'}</Text>
           </Animated.View>
-          {!user ? <Text style={appStyles.emptyState}>Entre na sua conta para receber recomendações personalizadas.</Text> : null}
+          {!user ? (
+            <View style={appStyles.visitorCard}>
+              <View style={appStyles.visitorIcon}><AppIcon name="chef-hat" size={21} color="#376044" /></View>
+              <View style={appStyles.visitorCopy}>
+                <Text style={appStyles.visitorTitle}>Explore sem criar uma conta</Text>
+                <Text style={appStyles.visitorDescription}>Receitas e busca estão liberadas. Crie uma conta quando quiser salvar, comentar ou publicar.</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Criar uma conta" style={appStyles.visitorAction} onPress={() => router.push('/signup')}>
+                <AppIcon name="arrow-right" size={18} color="#FCFAF5" />
+              </Pressable>
+            </View>
+          ) : null}
           {user && preferredTags.length === 0 ? <Text style={appStyles.emptyState}>Escolha suas preferências no perfil para personalizar as recomendações.</Text> : null}
           {recommendationError ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{recommendationError}</Text> : null}
           {notificationSyncError ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{notificationSyncError}</Text> : null}
@@ -138,8 +151,8 @@ export default function AppHomeScreen() {
                   onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                   <View style={appStyles.smallImage}>
                     {recipe.imageUrl
-                      ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.smallPhoto} resizeMode="cover" />
-                      : <Text style={appStyles.imageIcon}>♨</Text>}
+                      ? <RecipeImage uri={getRecipeMediaUrl(recipe.imageUrl)} style={appStyles.smallPhoto} />
+                      : <AppIcon name="chef-hat" size={34} color="#AAA391" />}
                   </View>
                   <Text style={appStyles.smallTitle}>{recipe.title}</Text>
                   <Text style={appStyles.featureMeta}>{recipe.reason}</Text>
@@ -168,8 +181,8 @@ export default function AppHomeScreen() {
                 onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                 <View style={appStyles.featureImage}>
                   {recipe.imageUrl
-                    ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.featurePhoto} resizeMode="cover" />
-                    : <Text style={appStyles.imageIcon}>♨</Text>}
+                    ? <RecipeImage uri={getRecipeMediaUrl(recipe.imageUrl)} style={appStyles.featurePhoto} iconSize={42} />
+                    : <AppIcon name="chef-hat" size={42} color="#AAA391" />}
                   <View style={appStyles.seasonBadge}>
                     <Text style={appStyles.seasonText}>DA ESTAÇÃO</Text>
                   </View>
@@ -195,7 +208,7 @@ export default function AppHomeScreen() {
                   disabled={!canScrollAllRecipesBack}
                   onPress={() => scrollAllRecipes(-1)}
                   style={[appStyles.carouselArrow, !canScrollAllRecipesBack && appStyles.carouselArrowDisabled]}>
-                  <Text style={appStyles.carouselArrowText}>‹</Text>
+                  <AppIcon name="chevron-left" size={19} color="#FCFAF5" />
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -203,7 +216,7 @@ export default function AppHomeScreen() {
                   disabled={!canScrollAllRecipesForward}
                   onPress={() => scrollAllRecipes(1)}
                   style={[appStyles.carouselArrow, !canScrollAllRecipesForward && appStyles.carouselArrowDisabled]}>
-                  <Text style={appStyles.carouselArrowText}>›</Text>
+                  <AppIcon name="chevron-right" size={19} color="#FCFAF5" />
                 </Pressable>
               </View>
             </Animated.View>
@@ -224,13 +237,14 @@ export default function AppHomeScreen() {
                 onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
                 <View style={appStyles.smallImage}>
                   {recipe.imageUrl
-                    ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.smallPhoto} resizeMode="cover" />
-                    : <Text style={appStyles.imageIcon}>♨</Text>}
+                    ? <RecipeImage uri={getRecipeMediaUrl(recipe.imageUrl)} style={appStyles.smallPhoto} />
+                    : <AppIcon name="chef-hat" size={30} color="#AAA391" />}
                 </View>
                 <Text style={appStyles.smallTitle}>{recipe.title}</Text>
-                <Text style={appStyles.rating}>
-                  <Text style={appStyles.star}>★ </Text>{recipe.averageRating?.toFixed(1) ?? 'Sem avaliações'}
-                </Text>
+                <View style={appStyles.ratingRow}>
+                  {recipe.averageRating !== null ? <AppIcon name="star" size={14} color="#DCA52A" /> : null}
+                  <Text style={appStyles.rating}>{recipe.averageRating?.toFixed(1) ?? 'Sem avaliações'}</Text>
+                </View>
               </Pressable>
               </Animated.View>
             ))}

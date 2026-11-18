@@ -4,10 +4,11 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppState } from '@/components/app-state';
+import { AppIcon } from '@/components/app-icon';
 import { shoppingStyles as styles } from '@/styles/shopping.styles';
 
 export default function ShoppingListScreen() {
-  const { shoppingItems, addIngredient, setShoppingItemCompleted, removeShoppingItem } = useAppState();
+  const { user, shoppingItems, addIngredient, setShoppingItemCompleted, removeShoppingItem } = useAppState();
   const [newItem, setNewItem] = useState('');
   const [error, setError] = useState('');
 
@@ -32,7 +33,7 @@ export default function ShoppingListScreen() {
             onPress={() => router.back()}
             style={styles.backButton}
           >
-            <Text style={styles.backArrow}>‹</Text>
+            <AppIcon name="arrow-left" size={20} color="#1E1E1B" />
           </Pressable>
 
           <Text style={styles.title}>Lista de compras</Text>
@@ -42,6 +43,7 @@ export default function ShoppingListScreen() {
           style={styles.listScroll}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
+          {!user ? <Pressable onPress={() => router.push('/login')}><Text style={styles.error}>Entre ou crie uma conta para criar e gerenciar sua lista de compras.</Text></Pressable> : null}
           {shoppingItems.map((item) => (
             <View key={item.id} style={styles.item}>
               <Pressable
@@ -49,7 +51,7 @@ export default function ShoppingListScreen() {
                 accessibilityState={{ checked: item.completed }}
                 onPress={() => void setShoppingItemCompleted(item.id, !item.completed)}
                 style={[styles.checkbox, item.completed && styles.checkboxCompleted]}>
-                {item.completed ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                {item.completed ? <AppIcon name="check" size={16} color="#FCFAF5" /> : null}
               </Pressable>
 
               <Text style={[styles.itemText, item.completed && styles.itemTextCompleted]}>
@@ -57,14 +59,14 @@ export default function ShoppingListScreen() {
               </Text>
 
               <Pressable accessibilityRole="button" accessibilityLabel={`Remover ${item.name}`} onPress={() => void removeShoppingItem(item.id)}>
-                <Text style={styles.remove}>×</Text>
+                <AppIcon name="x" size={18} color="#807A70" />
               </Pressable>
             </View>
           ))}
 
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
-          <View style={styles.addRow}>
+          {user ? <View style={styles.addRow}>
             <TextInput
               value={newItem}
               onChangeText={setNewItem}
@@ -78,15 +80,15 @@ export default function ShoppingListScreen() {
               style={styles.addButton}
               onPress={() => void handleAddItem()}
             >
-              <Text style={styles.addIcon}>+</Text>
+              <AppIcon name="plus" size={22} color="#FCFAF5" />
             </Pressable>
-          </View>
+          </View> : null}
         </ScrollView>
 
-        <Pressable style={styles.exportButton}>
-          <Text style={styles.exportIcon}>⇩</Text>
+        {user ? <Pressable style={styles.exportButton}>
+          <AppIcon name="download" size={19} color="#FCFAF5" />
           <Text style={styles.exportText}>Exportar lista</Text>
-        </Pressable>
+        </Pressable> : null}
 
       </SafeAreaView>
     </View>
