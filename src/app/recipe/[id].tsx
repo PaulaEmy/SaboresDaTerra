@@ -2,10 +2,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppState } from '@/components/app-state';
+import { AppIcon } from '@/components/app-icon';
+import { RecipeImage } from '@/components/recipe-image';
 import { addRecipeComment, deleteRecipeRating, getIngredientSubstitutions, getRecipe, getRecipeMediaUrl, reportRecipe, saveRecipeRating, type IngredientSubstitution, type Recipe, type RecipeMedia, type RecipeReview } from '@/services/auth-api';
 import { recipeStyles as styles } from '@/styles/recipe.styles';
 
@@ -65,6 +67,10 @@ export default function RecipeDetailScreen() {
   }
 
   async function submitComment() {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
     if (!recipe || !commentText.trim()) return;
     try {
       const comment = await addRecipeComment(recipe.id, commentText.trim());
@@ -77,6 +83,10 @@ export default function RecipeDetailScreen() {
   }
 
   async function submitRating() {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
     if (!recipe || !selectedRating) return;
     try {
       const rating = await saveRecipeRating(recipe.id, selectedRating, ratingComment);
@@ -142,12 +152,20 @@ export default function RecipeDetailScreen() {
   }
 
   function openRatingForm() {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
     setSelectedRating(recipe?.userReview?.rating ?? 0);
     setRatingComment(recipe?.userReview?.comment ?? '');
     setRatingModalVisible(true);
   }
 
   async function submitReport() {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
     if (!recipe) return;
     try {
       await reportRecipe({ recipeId: recipe.id, targetType: reportTarget, commentId: reportCommentId, reason: selectedReason, details: reportComment });
@@ -162,6 +180,10 @@ export default function RecipeDetailScreen() {
   }
 
   async function addAllIngredients() {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
     if (!recipe || addingAllIngredients) return;
     setAddingAllIngredients(true);
     setError('');
@@ -181,7 +203,7 @@ export default function RecipeDetailScreen() {
       <View style={styles.screen}>
         <SafeAreaView style={styles.safeArea} edges={['top']}>
           <View style={styles.header}>
-            <Pressable accessibilityLabel="Voltar" onPress={() => router.back()} style={styles.backButton}><Text style={styles.backArrow}>‹</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Voltar" onPress={() => router.back()} style={styles.backButton}><AppIcon name="arrow-left" size={20} color="#1E1E1B" /></Pressable>
             <Text style={styles.headerTitle}>Receita</Text>
           </View>
           <Text style={styles.description}>{loading ? 'Carregando receita...' : error || 'Receita não encontrada.'}</Text>
@@ -195,20 +217,20 @@ export default function RecipeDetailScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
           <Pressable accessibilityLabel="Voltar" onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backArrow}>‹</Text>
+            <AppIcon name="arrow-left" size={20} color="#1E1E1B" />
           </Pressable>
           <Text numberOfLines={1} style={styles.headerTitle}>{recipe.title}</Text>
-            <Pressable style={styles.headerSave} onPress={() => setSaveModalVisible(true)}>
-            <Text style={styles.headerSaveIcon}>{isSaved ? '▮' : '▯'}</Text>
+            <Pressable style={styles.headerSave} onPress={() => user ? setSaveModalVisible(true) : router.push('/login')}>
+            <AppIcon name="bookmark" size={20} color="#28551D" />
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.hero}>
             {coverImage
-              ? <Image source={{ uri: getRecipeMediaUrl(coverImage.url) }} style={styles.heroImage} resizeMode="cover" />
-              : <Text style={styles.heroIcon}>♨</Text>}
-            <Pressable style={styles.favoriteButton} onPress={() => setSaveModalVisible(true)}>
-              <Text style={[styles.favoriteIcon, isSaved && styles.favoriteIconActive]}>{isSaved ? '♥' : '♡'}</Text>
+              ? <RecipeImage uri={getRecipeMediaUrl(coverImage.url)} style={styles.heroImage} iconSize={48} />
+              : <AppIcon name="chef-hat" size={48} color="#AAA391" />}
+            <Pressable style={styles.favoriteButton} onPress={() => user ? setSaveModalVisible(true) : router.push('/login')}>
+              <AppIcon name="heart" size={22} color={isSaved ? '#C9704D' : '#756F65'} />
             </Pressable>
           </View>
           <View style={styles.content}>
@@ -221,7 +243,9 @@ export default function RecipeDetailScreen() {
             {recipe.tags.length ? <Text style={styles.recipeTags}>{recipe.tags.join(' · ')}</Text> : null}
             <Text style={styles.description}>{recipe.description}</Text>
             <View style={styles.stats}>
-              <Text style={styles.stat}>◷  {recipe.prepTimeMinutes} min</Text><Text style={styles.stat}>♧  {recipe.servings} porções</Text><Text style={styles.stat}>★  {averageRating} ({recipe.ratingCount})</Text>
+              <View style={styles.statItem}><AppIcon name="chef-hat" size={16} color="#756F65" /><Text style={styles.stat}>{recipe.prepTimeMinutes} min</Text></View>
+              <View style={styles.statItem}><AppIcon name="shopping-basket" size={16} color="#756F65" /><Text style={styles.stat}>{recipe.servings} porções</Text></View>
+              <View style={styles.statItem}><AppIcon name="star" size={16} color="#DCA52A" /><Text style={styles.stat}>{averageRating} ({recipe.ratingCount})</Text></View>
             </View>
             <View style={styles.tabs}>
               {([['ingredients', 'Ingredientes'], ['steps', 'Passos'], ['comments', 'Comentários']] as const).map(([value, label]) => (
@@ -236,6 +260,10 @@ export default function RecipeDetailScreen() {
               onAddAll={() => void addAllIngredients()}
               onSubstitute={(ingredient) => void openSubstitutions(ingredient)}
               onAdd={(ingredient, quantity) => {
+                if (!user) {
+                  router.push('/login');
+                  return;
+                }
                 void addIngredient(`${quantity} ${ingredient}`.trim())
                   .then(() => { setFeedbackMessage('Ingrediente adicionado com sucesso!'); setFeedbackVisible(true); })
                   .catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Não foi possível adicionar o ingrediente.'));
@@ -244,16 +272,26 @@ export default function RecipeDetailScreen() {
             {tab === 'steps' && <Steps steps={recipe.steps} media={recipe.media} />}
             {tab === 'comments' && <>
               <Reviews reviews={recipe.reviews} userId={user?.id} onDelete={() => void removeMyRating()} />
-              <Comments comments={recipe.comments} text={commentText} setText={setCommentText} onAdd={() => void submitComment()} onReport={(commentId) => openReport('comment', commentId)} />
+              <Comments
+                comments={recipe.comments}
+                text={commentText}
+                canWrite={Boolean(user)}
+                setText={setCommentText}
+                onLogin={() => router.push('/login')}
+                onAdd={() => void submitComment()}
+                onReport={(commentId) => openReport('comment', commentId)}
+              />
             </>}
             {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
-            <Pressable onPress={() => openReport('recipe')}><Text style={styles.reportLink}>Denunciar receita</Text></Pressable>
-            <View style={styles.bottomActions}>{user && !isRecipeAuthor ? <Pressable style={styles.rateButton} onPress={openRatingForm}><Text style={styles.actionText}>{recipe.userReview ? 'Editar avaliação' : 'Avaliar'}</Text></Pressable> : null}<Pressable style={styles.saveButton} onPress={() => setSaveModalVisible(true)}><Text style={styles.saveText}>{isSaved ? 'Salva' : 'Salvar'}</Text></Pressable></View>
+            {user ? <Pressable onPress={() => openReport('recipe')}><Text style={styles.reportLink}>Denunciar receita</Text></Pressable> : null}
+            {user ? (
+              <View style={styles.bottomActions}>{!isRecipeAuthor ? <Pressable style={styles.rateButton} onPress={openRatingForm}><Text style={styles.actionText}>{recipe.userReview ? 'Editar avaliação' : 'Avaliar'}</Text></Pressable> : null}<Pressable style={styles.saveButton} onPress={() => setSaveModalVisible(true)}><Text style={styles.saveText}>{isSaved ? 'Salva' : 'Salvar'}</Text></Pressable></View>
+            ) : <Pressable style={styles.saveButton} onPress={() => router.push('/login')}><Text style={styles.saveText}>Entre para avaliar ou salvar receitas</Text></Pressable>}
             {user ? <Pressable accessibilityRole="button" disabled={savingOffline} style={styles.offlineButton} onPress={() => void toggleOfflineSave()}><Text style={styles.actionText}>{savingOffline ? 'Salvando...' : isOfflineSaved ? 'Remover acesso offline' : 'Salvar para acesso offline'}</Text></Pressable> : null}
           </View>
         </ScrollView>
       </SafeAreaView>
-      <Modal visible={reportVisible} transparent animationType="slide" onRequestClose={() => setReportVisible(false)}>
+      {user ? <Modal visible={reportVisible} transparent animationType="slide" onRequestClose={() => setReportVisible(false)}>
         <View style={styles.modalBackdrop}><View style={styles.reportModal}>
           <Text style={styles.modalTitle}>Denunciar {reportTarget === 'recipe' ? 'receita' : 'comentário'}</Text>
           <Text style={styles.modalLabel}>MOTIVO</Text>
@@ -262,8 +300,8 @@ export default function RecipeDetailScreen() {
           <TextInput multiline value={reportComment} onChangeText={setReportComment} style={styles.reportInput} placeholder="Conte mais sobre o problema..." placeholderTextColor="#99928A" />
           <View style={styles.modalActions}><Pressable style={styles.cancelButton} onPress={() => setReportVisible(false)}><Text style={styles.actionText}>Cancelar</Text></Pressable><Pressable style={styles.dangerButton} onPress={() => void submitReport()}><Text style={styles.saveText}>Denunciar</Text></Pressable></View>
         </View></View>
-      </Modal>
-      <Modal visible={saveModalVisible} transparent animationType="slide" onRequestClose={() => setSaveModalVisible(false)}>
+      </Modal> : null}
+      {user ? <Modal visible={saveModalVisible} transparent animationType="slide" onRequestClose={() => setSaveModalVisible(false)}>
         <View style={styles.modalBackdrop}><View style={styles.reportModal}>
           <Text style={styles.modalTitleSave}>{isSaved ? 'Receita salva' : 'Salvar receita'}</Text>
           {!isSaved && <Pressable style={styles.saveOption} onPress={() => { void toggleSavedRecipe(recipe.id).then(() => setSaveModalVisible(false)).catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Não foi possível salvar a receita.')); }}><Text style={styles.saveOptionText}>Salvar nos favoritos</Text></Pressable>}
@@ -271,16 +309,16 @@ export default function RecipeDetailScreen() {
           {isSaved && <Pressable style={styles.removeSaveOption} onPress={() => { void toggleSavedRecipe(recipe.id).then(() => setSaveModalVisible(false)).catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Não foi possível atualizar favoritos.')); }}><Text style={styles.removeSaveText}>Remover dos favoritos</Text></Pressable>}
           <Pressable style={styles.cancelButton} onPress={() => setSaveModalVisible(false)}><Text style={styles.actionText}>Cancelar</Text></Pressable>
         </View></View>
-      </Modal>
-      <Modal visible={ratingModalVisible} transparent animationType="slide" onRequestClose={() => setRatingModalVisible(false)}>
+      </Modal> : null}
+      {user ? <Modal visible={ratingModalVisible} transparent animationType="slide" onRequestClose={() => setRatingModalVisible(false)}>
         <View style={styles.modalBackdrop}><View style={styles.reportModal}>
           <Text style={styles.modalTitleSave}>{recipe.userReview ? 'Edite sua avaliação' : 'Avalie esta receita'}</Text>
           <Text style={styles.ratingHint}>Como foi sua experiência?</Text>
-          <View style={styles.starPicker}>{[1, 2, 3, 4, 5].map((star) => <Pressable key={star} onPress={() => setSelectedRating(star)}><Text style={[styles.ratingStar, star <= selectedRating && styles.ratingStarActive]}>★</Text></Pressable>)}</View>
+          <View style={styles.starPicker}>{[1, 2, 3, 4, 5].map((star) => <Pressable key={star} accessibilityRole="button" accessibilityLabel={`${star} estrelas`} accessibilityState={{ selected: star <= selectedRating }} onPress={() => setSelectedRating(star)}><AppIcon name="star" size={34} color={star <= selectedRating ? '#DCA52A' : '#D9D2C4'} /></Pressable>)}</View>
           <TextInput value={ratingComment} onChangeText={setRatingComment} multiline maxLength={1000} placeholder="Conte sua experiência (opcional)" placeholderTextColor="#99928A" style={styles.reviewInput} />
           <View style={styles.modalActions}><Pressable style={styles.cancelButton} onPress={() => setRatingModalVisible(false)}><Text style={styles.actionText}>Cancelar</Text></Pressable><Pressable disabled={!selectedRating} style={[styles.saveButton, !selectedRating && styles.disabledButton]} onPress={() => void submitRating()}><Text style={styles.saveText}>Enviar</Text></Pressable></View>
         </View></View>
-      </Modal>
+      </Modal> : null}
       <Modal visible={substitutionVisible} transparent animationType="slide" onRequestClose={() => setSubstitutionVisible(false)}>
         <View style={styles.modalBackdrop}><View style={styles.reportModal}>
           <Text style={styles.modalTitleSave}>Alternativas para {substitutionIngredient}</Text>
@@ -298,7 +336,7 @@ export default function RecipeDetailScreen() {
           <Pressable style={styles.cancelButton} onPress={() => setSubstitutionVisible(false)}><Text style={styles.actionText}>Fechar</Text></Pressable>
         </View></View>
       </Modal>
-      {feedbackVisible && <Pressable style={styles.feedbackToast} onPress={() => setFeedbackVisible(false)}><Text style={styles.feedbackIcon}>✓</Text><Text style={styles.feedbackText}>{feedbackMessage}</Text></Pressable>}
+      {feedbackVisible && <Pressable style={styles.feedbackToast} onPress={() => setFeedbackVisible(false)}><AppIcon name="check" size={18} color="#FCFAF5" /><Text style={styles.feedbackText}>{feedbackMessage}</Text></Pressable>}
     </View>
   );
 }
@@ -315,7 +353,15 @@ function Ingredients({ ingredients, addingAll, onAdd, onAddAll, onSubstitute }: 
       <Pressable accessibilityRole="button" disabled={addingAll} onPress={onAddAll} style={[styles.addAllButton, addingAll && styles.disabledButton]}>
         <Text style={styles.addAllText}>{addingAll ? 'Adicionando ingredientes...' : 'Adicionar todos à lista de compras'}</Text>
       </Pressable>
-      {ingredients.map((ingredient, index) => <View key={`${ingredient.name}-${index}`} style={styles.ingredientRow}><Text style={styles.ingredient}>{ingredient.quantity ? `${ingredient.quantity} ` : ''}{ingredient.name}</Text><View style={styles.ingredientActions}><Pressable onPress={() => onAdd(ingredient.name, ingredient.quantity)}><Text style={styles.addToList}>+ LISTA</Text></Pressable><Pressable onPress={() => onSubstitute(ingredient.name)}><Text style={styles.substituteAction}>TROCAR</Text></Pressable></View></View>)}
+      {ingredients.map((ingredient, index) => (
+        <View key={`${ingredient.name}-${index}`} style={styles.ingredientRow}>
+          <Text style={styles.ingredient}>{ingredient.quantity ? `${ingredient.quantity} ` : ''}{ingredient.name}</Text>
+          <View style={styles.ingredientActions}>
+            <Pressable accessibilityRole="button" onPress={() => onAdd(ingredient.name, ingredient.quantity)}><AppIcon name="list-plus" size={17} color="#C9704D" /><Text style={styles.addToList}>LISTA</Text></Pressable>
+            <Pressable accessibilityRole="button" onPress={() => onSubstitute(ingredient.name)}><Text style={styles.substituteAction}>TROCAR</Text></Pressable>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -353,8 +399,27 @@ function InlineRecipeVideo({ media }: { media: RecipeMedia }) {
   return <VideoView player={player} nativeControls playsInline contentFit="contain" style={styles.mediaPlayer} />;
 }
 
-function Comments({ comments, text, setText, onAdd, onReport }: { comments: Recipe['comments']; text: string; setText: (value: string) => void; onAdd: () => void; onReport: (commentId: string) => void }) {
-  return <View style={styles.tabContent}>{comments.map((comment) => <View key={comment.id} style={styles.commentCard}><View style={styles.commentLine}><Text style={styles.commentAuthor}>{comment.author}</Text><Pressable accessibilityLabel="Denunciar comentário" onPress={() => onReport(comment.id)}><Text style={styles.flag}>⚑</Text></Pressable></View><Text style={styles.commentText}>{comment.text}</Text></View>)}{comments.length === 0 ? <Text style={styles.commentText}>Ainda não há comentários.</Text> : null}<TextInput value={text} onChangeText={setText} placeholder="Escreva um comentário..." placeholderTextColor="#99928A" style={styles.commentInput} /><Pressable style={styles.commentButton} onPress={onAdd}><Text style={styles.actionText}>Comentar</Text></Pressable></View>;
+function Comments({ comments, text, canWrite, setText, onLogin, onAdd, onReport }: { comments: Recipe['comments']; text: string; canWrite: boolean; setText: (value: string) => void; onLogin: () => void; onAdd: () => void; onReport: (commentId: string) => void }) {
+  return (
+    <View style={styles.tabContent}>
+      {comments.map((comment) => (
+        <View key={comment.id} style={styles.commentCard}>
+          <View style={styles.commentLine}>
+            <Text style={styles.commentAuthor}>{comment.author}</Text>
+            {canWrite ? <Pressable accessibilityRole="button" accessibilityLabel="Denunciar comentário" onPress={() => onReport(comment.id)}><AppIcon name="flag" size={18} color="#D42F2F" /></Pressable> : null}
+          </View>
+          <Text style={styles.commentText}>{comment.text}</Text>
+        </View>
+      ))}
+      {comments.length === 0 ? <Text style={styles.commentText}>Ainda não há comentários.</Text> : null}
+      {canWrite ? (
+        <>
+          <TextInput value={text} onChangeText={setText} placeholder="Escreva um comentário..." placeholderTextColor="#99928A" style={styles.commentInput} />
+          <Pressable style={styles.commentButton} onPress={onAdd}><Text style={styles.actionText}>Comentar</Text></Pressable>
+        </>
+      ) : <Pressable onPress={onLogin}><Text style={styles.commentText}>Entre ou crie uma conta para comentar.</Text></Pressable>}
+    </View>
+  );
 }
 
 function Reviews({ reviews, userId, onDelete }: { reviews: RecipeReview[]; userId?: string; onDelete: () => void }) {
@@ -365,7 +430,7 @@ function Reviews({ reviews, userId, onDelete }: { reviews: RecipeReview[]; userI
         <View key={review.userId} style={styles.commentCard}>
           <View style={styles.commentLine}>
             <Text style={styles.commentAuthor}>{review.author}</Text>
-            <Text style={styles.reviewStars}>{'★'.repeat(review.rating)}</Text>
+            <View style={{ flexDirection: 'row', gap: 2 }}>{[1, 2, 3, 4, 5].map((star) => <AppIcon key={star} name="star" size={14} color={star <= review.rating ? '#DCA52A' : '#D9D2C4'} />)}</View>
           </View>
           {review.comment ? <Text style={styles.commentText}>{review.comment}</Text> : <Text style={styles.commentText}>Sem comentário.</Text>}
           {userId === review.userId ? <Pressable accessibilityRole="button" onPress={onDelete}><Text style={styles.removeReview}>Excluir sua avaliação</Text></Pressable> : null}

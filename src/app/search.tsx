@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
+import { AppIcon } from '@/components/app-icon';
+import { RecipeImage } from '@/components/recipe-image';
 import { dietaryTags } from '@/constants/diet-tags';
 import { getRecipeMediaUrl, searchRecipes, type RecipeSummary } from '@/services/auth-api';
 import { appStyles } from '@/styles/app.styles';
@@ -38,13 +40,13 @@ export default function SearchScreen() {
         <ScrollView contentContainerStyle={appStyles.scrollContent}>
           <Text style={appStyles.userName}>Buscar receitas</Text>
           <View style={appStyles.searchBar}>
-            <Text style={appStyles.searchIcon}>⌕</Text>
+            <AppIcon name="search" size={21} color="#77736C" />
             <TextInput value={ingredient} onChangeText={setIngredient} placeholder="Nome, ingrediente ou tag..." placeholderTextColor="#77736C" style={appStyles.searchInput} />
           </View>
           <Text style={appStyles.filterLabel}>TEMPO DE PREPARO</Text>
           <TextInput value={time} onChangeText={(value) => setTime(value.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder="Digite o tempo máximo em minutos" placeholderTextColor="#77736C" style={appStyles.filterInput} />
           <Text style={appStyles.filterLabel}>DIFICULDADE</Text>
-          <View style={appStyles.dropdownWrapper}><Pressable style={appStyles.filterButton} onPress={() => setOpenFilter(openFilter === 'difficulty' ? null : 'difficulty')}><Text style={appStyles.filterText}>{difficulty}</Text><Text style={appStyles.dropdownArrow}>⌄</Text></Pressable>{openFilter === 'difficulty' && <DropdownOptions options={difficultyOptions} onSelect={(value) => { setDifficulty(value); setOpenFilter(null); }} />}</View>
+          <View style={appStyles.dropdownWrapper}><Pressable accessibilityRole="button" accessibilityState={{ expanded: openFilter === 'difficulty' }} style={appStyles.filterButton} onPress={() => setOpenFilter(openFilter === 'difficulty' ? null : 'difficulty')}><Text style={appStyles.filterText}>{difficulty}</Text><View style={appStyles.dropdownArrow}><AppIcon name="chevron-down" size={18} color="#756F65" /></View></Pressable>{openFilter === 'difficulty' && <DropdownOptions options={difficultyOptions} onSelect={(value) => { setDifficulty(value); setOpenFilter(null); }} />}</View>
           <Text style={appStyles.filterLabel}>TIPO DE DIETA</Text>
           <View style={appStyles.tagChoices}>
             {dietaryTags.map((option) => {
@@ -76,7 +78,7 @@ export default function SearchScreen() {
           {filteredRecipes.map((recipe) => (
             <Pressable key={recipe.id} style={[appStyles.smallCard, { width: '100%', marginBottom: 16 }]} onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
               <View style={appStyles.smallImage}>
-                {recipe.imageUrl ? <Image source={{ uri: getRecipeMediaUrl(recipe.imageUrl) }} style={appStyles.smallPhoto} resizeMode="cover" /> : <Text style={appStyles.imageIcon}>♨</Text>}
+                {recipe.imageUrl ? <RecipeImage uri={getRecipeMediaUrl(recipe.imageUrl)} style={appStyles.smallPhoto} /> : <AppIcon name="chef-hat" size={30} color="#AAA391" />}
               </View>
               <Text style={appStyles.smallTitle}>{recipe.title}</Text>
               <Text style={appStyles.featureMeta}>{recipe.prepTimeMinutes} min • Dificuldade {recipe.difficulty}</Text>

@@ -5,14 +5,17 @@ import { Image, Platform, Pressable, Text, TextInput, View } from 'react-native'
 import * as ImagePicker from 'expo-image-picker';
 
 import { AuthHeader, AuthScreen, Field, PrimaryButton } from '@/components/auth-ui';
+import { useAppState } from '@/components/app-state';
+import { AppIcon } from '@/components/app-icon';
 import { dietaryTags } from '@/constants/diet-tags';
-import { createRecipe, getRecipe, updateRecipe, uploadRecipeMedia, type RecipeMediaUpload, type UserRecipe } from '@/services/auth-api';
+import { createRecipe, getRecipe, updateRecipe, uploadRecipeMedia, type RecipeInput, type RecipeMediaUpload, type UserRecipe } from '@/services/auth-api';
 import { userRecipesStyles as styles } from '@/styles/user-recipes.styles';
 
 const difficultyOptions: UserRecipe['difficulty'][] = ['Fácil', 'Médio', 'Difícil'];
 const suggestedTags = dietaryTags;
 
 export default function CreateRecipeScreen() {
+  const { user, authLoading } = useAppState();
   const { editId } = useLocalSearchParams<{ editId?: string }>();
   const audioRecorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
   const recordingState = useAudioRecorderState(audioRecorder);
@@ -21,7 +24,7 @@ export default function CreateRecipeScreen() {
   const [prepTime, setPrepTime] = useState('');
   const [servings, setServings] = useState('');
   const [difficulty, setDifficulty] = useState<UserRecipe['difficulty'] | ''>('');
-  const [ingredients, setIngredients] = useState([{ name: '', quantity: '' }]);
+  const [ingredients, setIngredients] = useState<RecipeInput['ingredients']>([{ name: '', quantity: '', substituteName: '', substituteQuantity: '' }]);
   const [tags, setTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState('');
   const [steps, setSteps] = useState(['']);
@@ -34,7 +37,7 @@ export default function CreateRecipeScreen() {
   const [loadingRecipe, setLoadingRecipe] = useState(Boolean(editId));
 
   useEffect(() => {
-    if (!editId) return;
+    if (!editId || authLoading || !user) return;
     let active = true;
     getRecipe(editId)
       .then((recipe) => {
@@ -44,7 +47,13 @@ export default function CreateRecipeScreen() {
         setPrepTime(String(recipe.prepTimeMinutes));
         setServings(String(recipe.servings));
         setDifficulty(recipe.difficulty);
-        setIngredients(recipe.ingredients.length ? recipe.ingredients : [{ name: '', quantity: '' }]);
+        setIngredients(recipe.ingredients.length
+          ? recipe.ingredients.map((ingredient) => ({
+            ...ingredient,
+            substituteName: ingredient.substituteName ?? '',
+            substituteQuantity: ingredient.substituteQuantity ?? '',
+          }))
+          : [{ name: '', quantity: '', substituteName: '', substituteQuantity: '' }]);
         setTags(recipe.tags ?? []);
         setSteps(recipe.steps.length ? recipe.steps : ['']);
         setCreatedRecipeId(recipe.id);
@@ -56,7 +65,7 @@ export default function CreateRecipeScreen() {
         if (active) setLoadingRecipe(false);
       });
     return () => { active = false; };
-  }, [editId]);
+  }, [authLoading, editId, user]);
 
   async function toggleAudioRecording() {
     setError('');
@@ -164,7 +173,12 @@ export default function CreateRecipeScreen() {
     setSubmitting(true);
     try {
       const cleanIngredients = ingredients
-        .map((item) => ({ name: item.name.trim(), quantity: item.quantity.trim() }))
+        .map((item) => ({
+          name: item.name.trim(),
+          quantity: item.quantity.trim(),
+          substituteName: item.substituteName?.trim() ?? '',
+          substituteQuantity: item.substituteQuantity?.trim() ?? '',
+        }))
         .filter((item) => item.name);
       const cleanSteps = steps.map((step) => step.trim()).filter(Boolean);
       const input = {
@@ -205,6 +219,13 @@ export default function CreateRecipeScreen() {
   return (
     <AuthScreen>
       <AuthHeader title={editId ? 'Editar receita' : 'Nova receita'} />
+      {authLoading ? <Text style={styles.emptyText}>Verificando sua sessão...</Text> : !user ? (
+        <View style={styles.form}>
+          <Text style={styles.description}>Entre ou crie uma conta para cadastrar e editar receitas.</Text>
+          <PrimaryButton label="ENTRAR" onPress={() => router.replace('/login')} />
+          <PrimaryButton label="CRIAR CONTA" onPress={() => router.push('/signup')} />
+        </View>
+      ) : (
       <View style={styles.form}>
         {loadingRecipe ? <Text style={styles.emptyText}>Carregando receita...</Text> : null}
         <Field label="NOME DA RECEITA" placeholder="Ex.: Sopa de abóbora" autoCapitalize="sentences" value={title} onChangeText={setTitle} />
@@ -266,29 +287,39 @@ export default function CreateRecipeScreen() {
           </Pressable>
         </View>
         {tags.filter((tag) => !suggestedTags.some((suggested) => suggested.toLocaleLowerCase() === tag.toLocaleLowerCase())).map((tag) => (
-          <Pressable key={tag} onPress={() => setTags((current) => current.filter((item) => item !== tag))} style={styles.customTag}>
-            <Text style={styles.customTagText}>{tag}  ×</Text>
+          <Pressable key={tag} accessibilityRole="button" accessibilityLabel={`Remover tag ${tag}`} onPress={() => setTags((current) => current.filter((item) => item !== tag))} style={styles.customTag}>
+            <Text style={styles.customTagText}>{tag}</Text><AppIcon name="x" size={15} color="#C9704D" />
           </Pressable>
         ))}
 
         <Text style={styles.sectionTitle}>Ingredientes</Text>
         {ingredients.map((ingredient, index) => (
-          <View key={index} style={styles.row}>
-            <View style={styles.rowField}>
-              <Field label={`INGREDIENTE ${index + 1}`} placeholder="Ex.: farinha" value={ingredient.name} onChangeText={(name) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name } : item))} />
+          <View key={index} style={styles.ingredientFormRow}>
+            <View style={styles.row}>
+              <View style={styles.rowField}>
+                <Field label={`INGREDIENTE ${index + 1}`} placeholder="Ex.: farinha" value={ingredient.name} onChangeText={(name) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name } : item))} />
+              </View>
+              <View style={styles.rowField}>
+                <Field label="QUANTIDADE" placeholder="Ex.: 2 xícaras" value={ingredient.quantity} onChangeText={(quantity) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, quantity } : item))} />
+              </View>
+              {ingredients.length > 1 ? (
+                <Pressable accessibilityLabel={`Remover ingrediente ${index + 1}`} onPress={() => setIngredients((items) => items.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
+                  <AppIcon name="x" size={18} color="#C9704D" />
+                </Pressable>
+              ) : null}
             </View>
-            <View style={styles.rowField}>
-              <Field label="QUANTIDADE" placeholder="Ex.: 2 xícaras" value={ingredient.quantity} onChangeText={(quantity) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, quantity } : item))} />
+            <View style={styles.row}>
+              <View style={styles.rowField}>
+                <Field label="SUBSTITUTO (OPCIONAL)" placeholder="Ex.: leite de aveia" maxLength={160} value={ingredient.substituteName ?? ''} onChangeText={(substituteName) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, substituteName } : item))} />
+              </View>
+              <View style={styles.rowField}>
+                <Field label="QUANTIDADE DO SUBSTITUTO (OPCIONAL)" placeholder="Ex.: 1 xícara" maxLength={80} value={ingredient.substituteQuantity ?? ''} onChangeText={(substituteQuantity) => setIngredients((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, substituteQuantity } : item))} />
+              </View>
             </View>
-            {ingredients.length > 1 ? (
-              <Pressable accessibilityLabel={`Remover ingrediente ${index + 1}`} onPress={() => setIngredients((items) => items.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
-                <Text style={styles.removeText}>×</Text>
-              </Pressable>
-            ) : null}
           </View>
         ))}
-        <Pressable onPress={() => setIngredients((items) => [...items, { name: '', quantity: '' }])} style={styles.addButton}>
-          <Text style={styles.addText}>+ Adicionar ingrediente</Text>
+        <Pressable onPress={() => setIngredients((items) => [...items, { name: '', quantity: '', substituteName: '', substituteQuantity: '' }])} style={styles.addButton}>
+          <View style={styles.mediaButtonContent}><AppIcon name="plus" size={17} color="#28551D" /><Text style={styles.addText}>Adicionar ingrediente</Text></View>
         </Pressable>
 
         <Text style={styles.sectionTitle}>Modo de preparo</Text>
@@ -299,27 +330,27 @@ export default function CreateRecipeScreen() {
             </View>
             {steps.length > 1 ? (
               <Pressable accessibilityLabel={`Remover passo ${index + 1}`} onPress={() => setSteps((items) => items.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeButton}>
-                <Text style={styles.removeText}>×</Text>
+                <AppIcon name="x" size={18} color="#C9704D" />
               </Pressable>
             ) : null}
           </View>
         ))}
         <Pressable onPress={() => setSteps((items) => [...items, ''])} style={styles.addButton}>
-          <Text style={styles.addText}>+ Adicionar passo</Text>
+          <View style={styles.mediaButtonContent}><AppIcon name="plus" size={17} color="#28551D" /><Text style={styles.addText}>Adicionar passo</Text></View>
         </Pressable>
 
         <Text style={styles.sectionTitle}>Imagem, áudio e vídeo</Text>
         <View style={styles.mediaSection}>
           <Pressable onPress={chooseRecipeImage} style={styles.mediaButton}>
-            <Text style={styles.mediaButtonText}>{image ? '✓ Imagem selecionada · escolher outra' : '▧ Escolher imagem do celular'}</Text>
+            <View style={styles.mediaButtonContent}><AppIcon name={image ? 'check' : 'image'} size={18} color="#28551D" /><Text style={styles.mediaButtonText}>{image ? 'Imagem selecionada · escolher outra' : 'Escolher imagem do celular'}</Text></View>
           </Pressable>
           {image ? <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" /> : null}
           <Pressable onPress={toggleAudioRecording} style={styles.mediaButton}>
-            <Text style={styles.mediaButtonText}>{recordingState.isRecording ? '■ Parar gravação de áudio' : audio ? '✓ Áudio gravado · gravar novamente' : '● Gravar áudio da receita'}</Text>
+            <View style={styles.mediaButtonContent}><AppIcon name={recordingState.isRecording ? 'square' : audio ? 'check' : 'mic'} size={18} color="#28551D" /><Text style={styles.mediaButtonText}>{recordingState.isRecording ? 'Parar gravação de áudio' : audio ? 'Áudio gravado · gravar novamente' : 'Gravar áudio da receita'}</Text></View>
           </Pressable>
           {audio && !recordingState.isRecording ? <Text style={styles.success}>Áudio pronto para anexar.</Text> : null}
           <Pressable onPress={captureVideo} style={styles.mediaButton}>
-            <Text style={styles.mediaButtonText}>{video ? '✓ Vídeo gravado · gravar novamente' : '▣ Gravar vídeo da receita'}</Text>
+            <View style={styles.mediaButtonContent}><AppIcon name={video ? 'check' : 'video'} size={18} color="#28551D" /><Text style={styles.mediaButtonText}>{video ? 'Vídeo gravado · gravar novamente' : 'Gravar vídeo da receita'}</Text></View>
           </Pressable>
           {video ? <Text style={styles.success}>Vídeo pronto para anexar.</Text> : null}
         </View>
@@ -327,6 +358,7 @@ export default function CreateRecipeScreen() {
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         <PrimaryButton label={submitting ? 'SALVANDO...' : editId ? 'SALVAR ALTERAÇÕES' : 'SALVAR RECEITA'} onPress={handleCreateRecipe} disabled={submitting || loadingRecipe || recordingState.isRecording} />
       </View>
+      )}
     </AuthScreen>
   );
 }

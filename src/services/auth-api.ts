@@ -28,11 +28,18 @@ export type UserRecipe = {
   prepTimeMinutes: number;
   servings: number;
   difficulty: 'Fácil' | 'Médio' | 'Difícil';
-  ingredients: { name: string; quantity: string }[];
+  ingredients: RecipeIngredient[];
   tags: string[];
   steps: string[];
   media: RecipeMedia[];
   createdAt: string;
+};
+
+export type RecipeIngredient = {
+  name: string;
+  quantity: string;
+  substituteName?: string;
+  substituteQuantity?: string;
 };
 
 export type RecipeComment = {
@@ -261,7 +268,7 @@ export type RecipeInput = {
   prepTimeMinutes: number;
   servings: number;
   difficulty: UserRecipe['difficulty'];
-  ingredients: { name: string; quantity: string }[];
+  ingredients: RecipeIngredient[];
   tags: string[];
   steps: string[];
 };

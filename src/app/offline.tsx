@@ -5,10 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
 import { useAppState } from '@/components/app-state';
+import { AppIcon } from '@/components/app-icon';
 import { appStyles } from '@/styles/app.styles';
 
 export default function OfflineRecipesScreen() {
-  const { offlineRecipes, offlineSyncError, removeOfflineRecipe } = useAppState();
+  const { user, offlineRecipes, offlineSyncError, removeOfflineRecipe } = useAppState();
   const [error, setError] = useState('');
 
   async function handleRemove(recipeId: string) {
@@ -25,8 +26,16 @@ export default function OfflineRecipesScreen() {
       <SafeAreaView style={appStyles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={appStyles.scrollContent}>
           <Text style={appStyles.userName}>Receitas offline</Text>
+          {!user ? <Pressable style={appStyles.visitorCard} onPress={() => router.push('/login')}>
+            <View style={appStyles.visitorIcon}><AppIcon name="user" size={20} color="#28551D" /></View>
+            <View style={appStyles.visitorCopy}>
+              <Text style={appStyles.visitorTitle}>Acesso offline com conta</Text>
+              <Text style={appStyles.visitorDescription}>Entre para salvar receitas e consultá-las sem conexão.</Text>
+            </View>
+            <AppIcon name="chevron-right" size={19} color="#28551D" />
+          </Pressable> : null}
           <Text style={appStyles.featureMeta}>As receitas salvas ficam disponíveis sem conexão com ingredientes e modo de preparo. Fotos, vídeos, áudio e interações precisam de internet.</Text>
-          {offlineSyncError || error ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{error || offlineSyncError}</Text> : null}
+          {user && (offlineSyncError || error) ? <Text accessibilityRole="alert" style={appStyles.emptyState}>{error || offlineSyncError}</Text> : null}
           {offlineRecipes.map((recipe) => (
             <View key={recipe.id} style={appStyles.offlineRecipeCard}>
               <Pressable onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } })}>
@@ -38,7 +47,7 @@ export default function OfflineRecipesScreen() {
               </Pressable>
             </View>
           ))}
-          {offlineRecipes.length === 0 ? <Text style={appStyles.emptyState}>Nenhuma receita salva para acesso offline.</Text> : null}
+          {user && offlineRecipes.length === 0 ? <Text style={appStyles.emptyState}>Nenhuma receita salva para acesso offline.</Text> : null}
         </ScrollView>
       </SafeAreaView>
       <AppBottomNav />

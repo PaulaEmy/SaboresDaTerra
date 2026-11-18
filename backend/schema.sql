@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
   recipe_id CHAR(36) NOT NULL,
   name VARCHAR(160) NOT NULL,
   quantity VARCHAR(80) NOT NULL DEFAULT '',
+  substitute_name VARCHAR(160) NULL,
+  substitute_quantity VARCHAR(80) NULL,
   position SMALLINT UNSIGNED NOT NULL,
   CONSTRAINT fk_recipe_ingredients_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
   INDEX idx_recipe_ingredients_position (recipe_id, position)

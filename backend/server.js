@@ -103,7 +103,9 @@ function validateRecipePayload(body) {
     !Number.isInteger(servings) || servings < 1 || servings > 99 ||
     !['Fácil', 'Médio', 'Difícil'].includes(difficulty) ||
     !Array.isArray(ingredients) || ingredients.length < 1 || ingredients.length > 50 ||
-    ingredients.some((item) => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 160 || typeof item.quantity !== 'string' || !item.quantity.trim() || item.quantity.length > 80) ||
+    ingredients.some((item) => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 160 || typeof item.quantity !== 'string' || !item.quantity.trim() || item.quantity.length > 80 ||
+      (item.substituteName != null && (typeof item.substituteName !== 'string' || item.substituteName.length > 160)) ||
+      (item.substituteQuantity != null && (typeof item.substituteQuantity !== 'string' || item.substituteQuantity.length > 80))) ||
     !Array.isArray(tags) || tags.length > 20 ||
     tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 40) ||
     !Array.isArray(steps) || steps.length < 1 || steps.length > 50 ||
@@ -116,7 +118,12 @@ function validateRecipePayload(body) {
     prepTimeMinutes,
     servings,
     difficulty,
-    ingredients: ingredients.map((item) => ({ name: item.name.trim(), quantity: item.quantity.trim() })),
+    ingredients: ingredients.map((item) => ({
+      name: item.name.trim(),
+      quantity: item.quantity.trim(),
+      substituteName: typeof item.substituteName === 'string' ? item.substituteName.trim() : '',
+      substituteQuantity: typeof item.substituteQuantity === 'string' ? item.substituteQuantity.trim() : '',
+    })),
     tags: [...new Map(tags.map((tag) => [tag.trim().toLocaleLowerCase(), tag.trim()])).values()],
     steps: steps.map((step) => step.trim()),
   };
@@ -351,7 +358,7 @@ async function getRecipeDetails(recipeId, viewerId = null) {
 
   const recipe = recipes[0];
   const [[ingredients], [tags], [steps], [media], [comments], [reviews]] = await Promise.all([
-    pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipeId]),
+    pool.execute('SELECT name, quantity, substitute_name AS substituteName, substitute_quantity AS substituteQuantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipeId]),
     pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipeId]),
     pool.execute('SELECT instruction FROM recipe_steps WHERE recipe_id = ? ORDER BY position', [recipeId]),
     pool.execute('SELECT id, media_type, mime_type, file_size FROM recipe_media WHERE recipe_id = ? ORDER BY created_at', [recipeId]),
@@ -379,7 +386,11 @@ async function getRecipeDetails(recipeId, viewerId = null) {
     servings: recipe.servings,
     difficulty: recipe.difficulty,
     author: recipe.author_name,
-    ingredients,
+    ingredients: ingredients.map((ingredient) => ({
+      ...ingredient,
+      substituteName: ingredient.substituteName ?? '',
+      substituteQuantity: ingredient.substituteQuantity ?? '',
+    })),
     tags: tags.map((item) => item.tag),
     steps: steps.map((step) => step.instruction),
     media: media.map((item) => ({
@@ -741,7 +752,8 @@ app.get('/api/recipes/:id/substitutions', optionalAuth, async (request, response
     const [recipes] = await pool.execute('SELECT id FROM recipes WHERE id = ?', [request.params.id]);
     if (!recipes.length) return response.status(404).json({ error: 'Receita não encontrada.' });
     const [ingredients] = await pool.execute(
-      'SELECT name FROM recipe_ingredients WHERE recipe_id = ? AND LOWER(name) = LOWER(?)',
+      `SELECT name, quantity, substitute_name AS substituteName, substitute_quantity AS substituteQuantity
+       FROM recipe_ingredients WHERE recipe_id = ? AND LOWER(name) = LOWER(?)`,
       [request.params.id, ingredient],
     );
     if (!ingredients.length) return response.status(404).json({ error: 'O ingrediente não pertence a esta receita.' });
@@ -752,9 +764,21 @@ app.get('/api/recipes/:id/substitutions', optionalAuth, async (request, response
     const entry = substitutionCatalog.find((item) =>
       item.matches.some((match) => normalizedIngredient.includes(match)) &&
       !(item.matches.includes('leite') && normalizedIngredient.includes('creme de leite')));
-    const alternatives = (entry?.alternatives ?? [])
+    const recipeAlternative = ingredients[0].substituteName
+      ? [{
+        name: ingredients[0].substituteName,
+        ratio: ingredients[0].substituteQuantity || 'Ajuste conforme necessário',
+        reason: 'Alternativa informada pelo autor desta receita.',
+      }]
+      : [];
+    const catalogAlternatives = (entry?.alternatives ?? [])
       .filter((alternative) => !isVegan || alternative.vegan)
       .map(({ vegan, ...alternative }) => alternative);
+    const knownAlternatives = new Set(recipeAlternative.map((alternative) => alternative.name.toLocaleLowerCase()));
+    const alternatives = [
+      ...recipeAlternative,
+      ...catalogAlternatives.filter((alternative) => !knownAlternatives.has(alternative.name.toLocaleLowerCase())),
+    ];
     return response.json({
       ingredient,
       alternatives,
@@ -924,7 +948,7 @@ app.get('/api/recipes/mine', requireAuth, async (request, response, next) => {
     );
     const results = await Promise.all(recipes.map(async (recipe) => {
       const [[ingredients], [tags], [steps], [media]] = await Promise.all([
-        pool.execute('SELECT name, quantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipe.id]),
+        pool.execute('SELECT name, quantity, substitute_name AS substituteName, substitute_quantity AS substituteQuantity FROM recipe_ingredients WHERE recipe_id = ? ORDER BY position', [recipe.id]),
         pool.execute('SELECT tag FROM recipe_tags WHERE recipe_id = ? ORDER BY tag', [recipe.id]),
         pool.execute('SELECT instruction FROM recipe_steps WHERE recipe_id = ? ORDER BY position', [recipe.id]),
         pool.execute('SELECT id, media_type, mime_type, file_size FROM recipe_media WHERE recipe_id = ? ORDER BY created_at', [recipe.id]),
@@ -936,7 +960,11 @@ app.get('/api/recipes/mine', requireAuth, async (request, response, next) => {
         prepTimeMinutes: recipe.prep_time_minutes,
         servings: recipe.servings,
         difficulty: recipe.difficulty,
-        ingredients,
+        ingredients: ingredients.map((ingredient) => ({
+          ...ingredient,
+          substituteName: ingredient.substituteName ?? '',
+          substituteQuantity: ingredient.substituteQuantity ?? '',
+        })),
         tags: tags.map((item) => item.tag),
         steps: steps.map((step) => step.instruction),
         media: media.map((item) => ({
@@ -981,8 +1009,8 @@ app.post('/api/recipes', requireAuth, async (request, response, next) => {
     );
     for (const [position, ingredient] of recipe.ingredients.entries()) {
       await connection.execute(
-        'INSERT INTO recipe_ingredients (id, recipe_id, name, quantity, position) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), recipeId, ingredient.name, ingredient.quantity, position],
+        'INSERT INTO recipe_ingredients (id, recipe_id, name, quantity, substitute_name, substitute_quantity, position) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [randomUUID(), recipeId, ingredient.name, ingredient.quantity, ingredient.substituteName || null, ingredient.substituteQuantity || null, position],
       );
     }
     for (const tag of recipe.tags) {
@@ -1025,8 +1053,8 @@ app.put('/api/recipes/:id', requireAuth, async (request, response, next) => {
     await connection.execute('DELETE FROM recipe_tags WHERE recipe_id = ?', [request.params.id]);
     for (const [position, ingredient] of recipe.ingredients.entries()) {
       await connection.execute(
-        'INSERT INTO recipe_ingredients (id, recipe_id, name, quantity, position) VALUES (?, ?, ?, ?, ?)',
-        [randomUUID(), request.params.id, ingredient.name, ingredient.quantity, position],
+        'INSERT INTO recipe_ingredients (id, recipe_id, name, quantity, substitute_name, substitute_quantity, position) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [randomUUID(), request.params.id, ingredient.name, ingredient.quantity, ingredient.substituteName || null, ingredient.substituteQuantity || null, position],
       );
     }
     for (const tag of recipe.tags) {
@@ -1115,13 +1143,29 @@ app.get('/api/recipes/:recipeId/media/:mediaId', async (request, response, next)
       [request.params.mediaId, request.params.recipeId],
     );
     if (!media.length) return response.status(404).json({ error: 'Arquivo não encontrado.' });
-    return response.type(media[0].mime_type).sendFile(join(uploadDirectory, media[0].file_name));
+    const filePath = join(uploadDirectory, media[0].file_name);
+    return response.type(media[0].mime_type).sendFile(filePath, async (error) => {
+      if (!error) return;
+      if (error.code === 'ENOENT' && !response.headersSent) {
+        try {
+          await pool.execute(
+            'DELETE FROM recipe_media WHERE id = ? AND file_name = ?',
+            [request.params.mediaId, media[0].file_name],
+          );
+        } catch (cleanupError) {
+          return next(cleanupError);
+        }
+        return response.status(404).json({ error: 'Esta mídia não está mais disponível. O arquivo não foi encontrado no armazenamento.' });
+      }
+      return next(error);
+    });
   } catch (error) {
     return next(error);
   }
 });
 
 app.use((error, _request, response, _next) => {
+  if (response.headersSent) return _next(error);
   console.error(error);
   return response.status(500).json({ error: 'Não foi possível concluir a solicitação.' });
 });
@@ -1160,10 +1204,24 @@ await pool.query(`CREATE TABLE IF NOT EXISTS recipe_ingredients (
   recipe_id CHAR(36) NOT NULL,
   name VARCHAR(160) NOT NULL,
   quantity VARCHAR(80) NOT NULL DEFAULT '',
+  substitute_name VARCHAR(160) NULL,
+  substitute_quantity VARCHAR(80) NULL,
   position SMALLINT UNSIGNED NOT NULL,
   CONSTRAINT fk_recipe_ingredients_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
   INDEX idx_recipe_ingredients_position (recipe_id, position)
 )`);
+const [recipeIngredientColumns] = await pool.query(
+  `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recipe_ingredients'
+   AND COLUMN_NAME IN ('substitute_name', 'substitute_quantity')`,
+);
+const existingRecipeIngredientColumns = new Set(recipeIngredientColumns.map((column) => column.COLUMN_NAME));
+if (!existingRecipeIngredientColumns.has('substitute_name')) {
+  await pool.query('ALTER TABLE recipe_ingredients ADD COLUMN substitute_name VARCHAR(160) NULL');
+}
+if (!existingRecipeIngredientColumns.has('substitute_quantity')) {
+  await pool.query('ALTER TABLE recipe_ingredients ADD COLUMN substitute_quantity VARCHAR(80) NULL');
+}
 await pool.query(`CREATE TABLE IF NOT EXISTS recipe_tags (
   recipe_id CHAR(36) NOT NULL,
   tag VARCHAR(40) NOT NULL,

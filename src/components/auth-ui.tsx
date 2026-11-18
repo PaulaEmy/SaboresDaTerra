@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors } from '@/constants/theme';
+import { AppIcon } from '@/components/app-icon';
 import { authUiStyles } from '@/styles/auth-ui.styles';
 
 export function AuthScreen({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,7 @@ export function AuthHeader({ title }: { title: string }) {
   return (
     <View style={authUiStyles.header}>
       <Pressable accessibilityLabel="Voltar" onPress={() => router.back()} style={authUiStyles.backButton}>
-        <Text style={authUiStyles.backArrow}>‹</Text>
+        <AppIcon name="arrow-left" size={20} color="#181816" />
       </Pressable>
       <Text style={authUiStyles.headerTitle}>{title}</Text>
     </View>

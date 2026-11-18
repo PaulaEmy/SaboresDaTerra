@@ -5,6 +5,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBottomNav } from '@/components/app-bottom-nav';
+import { AppIcon } from '@/components/app-icon';
 import { useAppState } from '@/components/app-state';
 import { dietaryTags } from '@/constants/diet-tags';
 import { getRecommendations } from '@/services/auth-api';
@@ -107,25 +108,26 @@ export default function ProfileScreen() {
             </View>
             {authError ? <Text accessibilityRole="alert" style={styles.errorText}>{authError}</Text> : null}
           </Animated.View>
-          {menuItems.map((item, index) => (
+          {!user ? <Pressable style={styles.menuItem} onPress={() => router.push('/login')}><Text style={styles.menuText}>Entrar ou criar uma conta</Text><AppIcon name="chevron-right" size={19} color="#7E786F" /></Pressable> : null}
+          {user ? menuItems.map((item, index) => (
             <Animated.View key={item.label} entering={FadeInDown.duration(360).delay(100 + index * 55)}>
               <Pressable
                 style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
                 onPress={() => router.push(item.path)}>
                 <Text style={styles.menuText}>{item.label}</Text>
-                <Text style={styles.chevron}>›</Text>
+                <AppIcon name="chevron-right" size={19} color="#7E786F" />
               </Pressable>
             </Animated.View>
-          ))}
-          <Animated.View entering={FadeInDown.duration(360).delay(265)}>
+          )) : null}
+          {user ? <Animated.View entering={FadeInDown.duration(360).delay(265)}>
             <Pressable
               style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
               onPress={() => router.push('/settings')}>
               <Text style={styles.menuText}>Configurações</Text>
-              <Text style={styles.chevron}>›</Text>
+              <AppIcon name="chevron-right" size={19} color="#7E786F" />
             </Pressable>
-          </Animated.View>
-          <Animated.View entering={FadeInDown.duration(400).delay(320)} style={styles.restrictionsCard}>
+          </Animated.View> : null}
+          {user ? <Animated.View entering={FadeInDown.duration(400).delay(320)} style={styles.restrictionsCard}>
             <Text style={styles.restrictionsTitle}>Preferências alimentares</Text>
             <Text style={styles.restrictionsDescription}>Escolha os tipos de receita que devem aparecer nas recomendações. A busca continua mostrando todas as receitas.</Text>
             <View style={styles.preferenceChoices}>
@@ -148,8 +150,8 @@ export default function ProfileScreen() {
             {savingPreferences ? <Text style={styles.restrictionsDescription}>Salvando preferências...</Text> : null}
             {preferenceError ? <Text accessibilityRole="alert" style={styles.errorText}>{preferenceError}</Text> : null}
             {notificationError ? <Text accessibilityRole="alert" style={styles.errorText}>{notificationError}</Text> : null}
-          </Animated.View>
-          <Animated.View entering={FadeInDown.duration(400).delay(380)} style={styles.restrictionsCard}>
+          </Animated.View> : null}
+          {user ? <Animated.View entering={FadeInDown.duration(400).delay(380)} style={styles.restrictionsCard}>
             <Text style={styles.restrictionsTitle}>Restrições alimentares</Text>
             <Text style={styles.restrictionsDescription}>Receitas com estes ingredientes serão ocultadas no início e nas recomendações. A busca continua mostrando todos os resultados; confira sempre os ingredientes e rótulos, pois isso não garante segurança contra alergênicos.</Text>
             {!user ? <Text style={styles.restrictionsDescription}>Entre na sua conta para salvar suas restrições.</Text> : null}
@@ -172,7 +174,7 @@ export default function ProfileScreen() {
                 disabled={!user || savingRestrictions || personalDataLoading || Boolean(personalDataError) || !ingredientInput.trim()}
                 onPress={addRestriction}
                 style={styles.restrictionAddButton}>
-                <Text style={styles.restrictionAddText}>+</Text>
+                <AppIcon name="plus" size={20} color="#FCFAF5" />
               </Pressable>
             </View>
             {hiddenIngredients.map((ingredient) => (
@@ -188,12 +190,12 @@ export default function ProfileScreen() {
               </View>
             ))}
             {restrictionError ? <Text accessibilityRole="alert" style={styles.errorText}>{restrictionError}</Text> : null}
-          </Animated.View>
-          <Animated.View entering={FadeInDown.duration(360).delay(440)}>
+          </Animated.View> : null}
+          {user ? <Animated.View entering={FadeInDown.duration(360).delay(440)}>
             <Pressable style={({ pressed }) => [styles.logout, pressed && styles.pressed]} onPress={handleSignOut}>
               <Text style={styles.logoutText}>Sair</Text>
             </Pressable>
-          </Animated.View>
+          </Animated.View> : null}
         </ScrollView>
       </SafeAreaView>
       <AppBottomNav />
